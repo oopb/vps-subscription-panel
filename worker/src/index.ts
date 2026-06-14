@@ -156,7 +156,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     return jsonResponse({
       yaml: result.yaml,
       nodeCount: result.nodeCount,
-      sources: result.sources.map((source) => (user.isAdmin ? source : withoutSourceUrl(source))),
+      sources: result.sources.map(withoutSourceUrl),
       shadowrocketText: result.shadowrocket.text,
       shadowrocketQrDataUrl: result.shadowrocket.qrDataUrl,
       shadowrocketQrError: result.shadowrocket.qrError,
@@ -581,7 +581,6 @@ async function generateConfigForUser(
   for (const result of fetched) {
     sources.push({
       name: result.name,
-      url: result.url,
       ok: result.ok,
       nodes: result.nodeCount,
       error: result.error,
@@ -1670,7 +1669,7 @@ const APP_HTML = String.raw`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VPS 订阅面板</title>
+  <title>订阅面板</title>
   <style>
     :root {
       color-scheme: light;
@@ -1983,7 +1982,7 @@ const APP_HTML = String.raw`<!doctype html>
       return [
         '<main class="login">',
         '<section class="login-panel">',
-        '<h1>VPS 订阅面板</h1>',
+        '<h1>订阅面板</h1>',
         '<form id="loginForm">',
         '<label>用户名<input name="username" autocomplete="username"></label><br>',
         '<label>密码<input name="password" type="password" autocomplete="current-password"></label>',
@@ -1999,7 +1998,7 @@ const APP_HTML = String.raw`<!doctype html>
       return [
         '<div class="app">',
         '<header class="topbar">',
-        '<div class="brand">VPS 订阅面板</div>',
+        '<div class="brand">订阅面板</div>',
         '<div class="userbar"><span>' + esc(state.user.username) + '</span><button id="logoutBtn">退出</button></div>',
         '</header>',
         '<div class="layout">',
@@ -2045,11 +2044,10 @@ const APP_HTML = String.raw`<!doctype html>
     }
 
     function renderGenerateTab() {
-      var showSourceUrl = state.user && state.user.isAdmin;
       var sources = state.sources.map(function(item) {
-        return '<tr><td>' + esc(item.name) + '</td><td>' + (item.ok ? '<span class="ok">成功</span>' : '<span class="error">失败</span>') + '</td><td>' + esc(item.nodes) + '</td>' + (showSourceUrl ? '<td class="mono">' + esc(item.url || "") + '</td>' : '') + '<td>' + esc(item.error || "") + '</td></tr>';
+        return '<tr><td>' + esc(item.name) + '</td><td>' + (item.ok ? '<span class="ok">成功</span>' : '<span class="error">失败</span>') + '</td><td>' + esc(item.nodes) + '</td><td>' + esc(item.error || "") + '</td></tr>';
       }).join("");
-      var sourceHead = '<tr><th>名称</th><th>状态</th><th>节点数</th>' + (showSourceUrl ? '<th>链接</th>' : '') + '<th>错误</th></tr>';
+      var sourceHead = '<tr><th>名称</th><th>状态</th><th>节点数</th><th>错误</th></tr>';
       return [
         '<section class="panel">',
         '<h2>生成订阅</h2>',
@@ -2304,15 +2302,53 @@ const APP_HTML = String.raw`<!doctype html>
       URL.revokeObjectURL(url);
     }
 
+    async function writeClipboardText(text) {
+      if (!text) throw new Error("没有可复制的内容。");
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch (error) {
+          // Fall back below for HTTP/IP access or stricter browser settings.
+        }
+      }
+
+      var textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      var copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (!copied) {
+        throw new Error("浏览器阻止了自动复制，请手动选中文本复制。");
+      }
+    }
+
     async function copyYaml() {
-      await navigator.clipboard.writeText(state.yaml);
-      state.message = "YAML 已复制。";
+      try {
+        await writeClipboardText(state.yaml);
+        state.message = "YAML 已复制。";
+        state.error = "";
+      } catch (error) {
+        state.error = error.message;
+      }
       render();
     }
 
     async function copyShadowrocket() {
-      await navigator.clipboard.writeText(state.shadowrocketText || "");
-      state.message = state.shadowrocketUseBase64 ? "小火箭 Base64 已复制。" : "节点链接已复制。";
+      try {
+        await writeClipboardText(state.shadowrocketText || "");
+        state.message = state.shadowrocketUseBase64 ? "小火箭 Base64 已复制。" : "节点链接已复制。";
+        state.error = "";
+      } catch (error) {
+        state.error = error.message;
+      }
       render();
     }
 
