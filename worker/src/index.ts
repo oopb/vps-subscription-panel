@@ -709,17 +709,6 @@ async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetc
     body: JSON.stringify({ url }),
     redirect: "follow",
   });
-  if (response.headers.get("x-vps-subscription-relay") !== "1") {
-    const body = await response.text();
-    return jsonResponse(
-      {
-        error:
-          "Relay 地址没有命中 VPS 中转服务。请检查 Relay 地址是否填成 https://你的域名/fetch 或 http://VPS真实IP:8788/fetch，且 /health 能返回 {\"ok\":true}" +
-          summarizeHttpErrorBodyClean(body),
-      },
-      502,
-    );
-  }
   return response;
 }
 
