@@ -1,0 +1,12 @@
+name = "vps-subscription-panel"
+main = "src/index.ts"
+compatibility_date = "2026-06-14"
+
+rules = [
+  { type = "Text", globs = ["**/*.yaml"], fallthrough = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vps_subscription_db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

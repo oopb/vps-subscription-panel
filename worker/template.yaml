@@ -1,0 +1,521 @@
+mixed-port: 7890
+redir-port: 7892
+tproxy-port: 7895
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: true
+unified-delay: true
+tcp-concurrent: true
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+geodata-mode: true
+geo-auto-update: true
+geo-update-interval: 24
+geox-url:
+  geoip: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
+  geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
+  mmdb: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb
+
+sniffer:
+  enable: true
+  sniff:
+    TLS:
+      ports:
+        - 443
+        - 8443
+    HTTP:
+      ports:
+        - 80
+        - 8080-8880
+      override-destination: true
+    QUIC:
+      ports:
+        - 443
+        - 8443
+  skip-domain:
+    - Mijia Cloud
+    - dlg.io.mi.com
+    - "+.push.apple.com"
+    - "+.googlevideo.com"
+    - "+.douyin.com"
+    - "+.douyincdn.com"
+    - "+.douyinpic.com"
+    - "+.douyinstatic.com"
+    - "+.douyinliving.com"
+    - "+.amemv.com"
+    - "+.snssdk.com"
+    - "+.byteimg.com"
+    - "+.pstatp.com"
+    - "+.xiaohongshu.com"
+    - "+.xhscdn.com"
+    - "+.xhscdn.net"
+    - "+.xhslink.com"
+    - "+.xhsimg.com"
+    - "+.taobao.com"
+    - "+.tmall.com"
+    - "+.tbcdn.cn"
+    - "+.alicdn.com"
+    - "+.alibaba.com"
+    - "+.alibabausercontent.com"
+    - "+.alipay.com"
+    - "+.alipayobjects.com"
+    - "+.goofish.com"
+    - "+.idlefish.com"
+    - "+.aliyun.com"
+    - "+.aliyuncs.com"
+    - "+.mmstat.com"
+    - "+.cainiao.com"
+    - "+.amap.com"
+    - "+.autonavi.com"
+    - "+.115.com"
+    - "+.115cdn.com"
+    - "+.115cdn.net"
+    - "+.115img.com"
+    - "+.116cd.cn"
+    - "+.116cd.com"
+    - "+.116cd.net"
+    - "+.anxia.com"
+    - "+.sq.cc"
+    - fhnfile.oss-cn-shenzhen.aliyuncs.com
+tun:
+  enable: true
+  stack: mixed
+  mtu: 1492
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+  auto-route: true
+  auto-detect-interface: true
+  strict-route: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  cache-algorithm: arc
+  ipv6: true
+  prefer-ipv6: false
+  prefer-h3: false
+  use-hosts: true
+  use-system-hosts: true
+  respect-rules: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-range6: fdfe:dcba:9876::1/64
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "+.localdomain"
+    - localhost.ptlogin2.qq.com
+    - time.windows.com
+    - time.apple.com
+    - time.android.com
+    - "+.xn--ngstr-lra8j.com"
+    - "+.ntp.org.cn"
+    - "+.pool.ntp.org"
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver-policy:
+    "geosite:private,cn,geolocation-cn,apple-cn,microsoft@cn,steam@cn":
+      - 223.5.5.5
+      - 119.29.29.29
+    "+.google.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.googleapis.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.googleapis.cn":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.gstatic.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.gvt1.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.gvt2.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.gvt3.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.googleusercontent.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.ggpht.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.android.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.xn--ngstr-lra8j.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.openai.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.chatgpt.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.anthropic.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.claude.ai":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "+.claude.com":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+    "geosite:geolocation-!cn":
+      - https://1.1.1.1/dns-query#PROXY
+      - https://dns.google/dns-query#PROXY
+  nameserver:
+    - https://1.1.1.1/dns-query#PROXY
+    - https://1.0.0.1/dns-query#PROXY
+    - https://dns.google/dns-query#PROXY
+  fallback:
+    - https://1.1.1.1/dns-query#PROXY
+    - https://dns.google/dns-query#PROXY
+  proxy-server-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  direct-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  direct-nameserver-follow-policy: true
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+
+proxies:
+  - name: vless-reality
+    type: vless
+    server: 154.40.34.167
+    port: 443
+    uuid: 902ff643-3337-47c7-ce5e-fb5ea84200f9
+    network: tcp
+    udp: true
+    tls: true
+    servername: amd.com
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    reality-opts:
+      public-key: BnOyLfdsGczI8dbFCaLdnVZ7KLXlC5xsRmRPymaBrm4
+      short-id: '66'
+  - name: tuic-443
+    type: tuic
+    server: 154.40.34.167
+    port: 443
+    uuid: 902ff643-3337-47c7-ce5e-fb5ea84200f9
+    password: uLZi4bOhhi
+    sni: amd.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+  - name: vless-reality-9929
+    type: vless
+    server: 70.39.178.138
+    port: 443
+    uuid: 7000a3ea-5b29-4014-847e-4d9e00442fba
+    network: tcp
+    udp: true
+    tls: true
+    servername: www.microsoft.com
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    reality-opts:
+      public-key: ksyeZxfqU-ZIAgohGpxB3Y8T24U1cH-RTpVLErsXeQU
+  - name: tuic-443-9929
+    type: tuic
+    server: 70.39.178.138
+    port: 443
+    uuid: 7000a3ea-5b29-4014-847e-4d9e00442fba
+    password: BUOmEWnbyQ
+    sni: www.microsoft.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+  - name: ccs-tuic-443
+    type: tuic
+    server: 107.173.127.179
+    port: 443
+    uuid: 6d4cea90-1db4-4c05-aac4-cd5c93eb712e
+    password: PE8fxjNAZK
+    sni: amd.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+  - name: ccs-tuic-443-ipv6
+    type: tuic
+    server: 2001:470:c:117c::103
+    port: 443
+    uuid: 6d4cea90-1db4-4c05-aac4-cd5c93eb712e
+    password: PE8fxjNAZK
+    sni: amd.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+
+  - name: jp-vless
+    type: vless
+    server: 82.158.226.56
+    port: 443
+    uuid: acd16eed-91c1-4eaa-d248-a534ef662495
+    network: tcp
+    udp: true
+    tls: true
+    servername: aws.com
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    reality-opts:
+      public-key: l1Na8Ah56zFda55FB2oCvE-ccPgyQy6-RmaAIe02-WU
+      short-id: d43418
+  - name: hk-vless
+    type: vless
+    server: 82.158.226.56
+    port: 8443
+    uuid: acd16eed-91c1-4eaa-d248-a534ef662495
+    network: tcp
+    udp: true
+    tls: true
+    servername: aws.com
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    reality-opts:
+      public-key: l1Na8Ah56zFda55FB2oCvE-ccPgyQy6-RmaAIe02-WU
+      short-id: d43418
+  - name: hk-tuic
+    type: tuic
+    server: 82.158.226.56
+    port: 443
+    uuid: acd16eed-91c1-4eaa-d248-a534ef662495
+    password: x0PGFuCP4J
+    sni: aws.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+  - name: us-vless
+    type: vless
+    server: 38.14.254.222
+    port: 443
+    uuid: 47919484-5d77-460d-c9a9-22519cf0f427
+    network: tcp
+    udp: true
+    tls: true
+    servername: amd.com
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    reality-opts:
+      public-key: jiTXTEEsm95l9rUhXYXIEvGjfhaM-qtCuwibPlIydEQ
+  - name: us-tuic
+    type: tuic
+    server: 38.14.254.222
+    port: 443
+    uuid: 47919484-5d77-460d-c9a9-22519cf0f427
+    password: uYeMP97E6P
+    sni: amd.com
+    skip-cert-verify: true
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn:
+      - h3
+      - h2
+      - http/1.1
+
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    proxies:
+      - vless-reality
+      - tuic-443
+      - vless-reality-9929
+      - tuic-443-9929
+      - ccs-tuic-443
+      - ccs-tuic-443-ipv6
+
+      - hk-vless
+      - jp-vless
+      - hk-tuic
+      - us-vless
+      - us-tuic
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    lazy: true
+  - name: PROXY
+    type: select
+    proxies:
+      - AUTO
+      - DIRECT
+
+      - vless-reality
+      - tuic-443
+      - vless-reality-9929
+      - tuic-443-9929
+      - ccs-tuic-443
+      - ccs-tuic-443-ipv6
+
+      - hk-vless
+      - jp-vless
+      - hk-tuic
+      - us-vless
+      - us-tuic
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+
+rules:
+  # 核心优化：强制阿里系应用放弃 QUIC (UDP 443)，瞬间回退 TCP 解决转圈慢的问题
+  - AND,((NETWORK,UDP),(DST-PORT,443),(GEOSITE,alibaba)),REJECT
+
+  # 泄漏测试站点强制走代理，避免 geosite 误判为国内直连
+  - DOMAIN-SUFFIX,browserleaks.com,PROXY
+  - DOMAIN-SUFFIX,browserleaks.org,PROXY
+  - DOMAIN-SUFFIX,browserleaks.net,PROXY
+  - DOMAIN-SUFFIX,dnsleaktest.com,PROXY
+  - DOMAIN-SUFFIX,ipleak.net,PROXY
+
+  - GEOSITE,private,DIRECT
+  - GEOSITE,alibaba,DIRECT
+
+  - DST-PORT,22,DIRECT
+
+  - DOMAIN,clash.razord.top,DIRECT
+  - DOMAIN,yacd.haishan.me,DIRECT
+  - DOMAIN-KEYWORD,buaa,DIRECT
+  - DOMAIN-KEYWORD,cnki,DIRECT
+
+  - RULE-SET,reject,REJECT
+  - RULE-SET,adblockmihomo,REJECT
+
+  # - RULE-SET,direct,DIRECT
+  - RULE-SET,lancidr,DIRECT
+  - RULE-SET,cncidr,DIRECT
+
+  # 代理规则 (AI 品牌与 Google 核心服务)
+  - DOMAIN-SUFFIX,openai.com,PROXY
+  - DOMAIN-SUFFIX,chatgpt.com,PROXY
+  - DOMAIN-SUFFIX,anthropic.com,PROXY
+  - DOMAIN-SUFFIX,claude.ai,PROXY
+  - DOMAIN-SUFFIX,claude.com,PROXY
+  - DOMAIN-SUFFIX,google.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.cn,PROXY
+  - DOMAIN-SUFFIX,gstatic.com,PROXY
+  - DOMAIN-SUFFIX,gvt1.com,PROXY
+  - DOMAIN-SUFFIX,gvt2.com,PROXY
+  - DOMAIN-SUFFIX,gvt3.com,PROXY
+  - DOMAIN-SUFFIX,googleusercontent.com,PROXY
+  - DOMAIN-SUFFIX,ggpht.com,PROXY
+  - DOMAIN-SUFFIX,android.com,PROXY
+  - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,PROXY
+
+  # 基础规则集匹配
+  - GEOSITE,google,PROXY
+  - GEOSITE,youtube,PROXY
+  - GEOSITE,telegram,PROXY
+  - GEOSITE,github,PROXY
+  - GEOSITE,category-games@cn,DIRECT
+  - GEOSITE,apple-cn,DIRECT
+  - GEOSITE,apple,DIRECT
+  - GEOSITE,microsoft@cn,DIRECT
+  - GEOSITE,steam@cn,DIRECT
+  - DOMAIN-SUFFIX,cn,DIRECT
+  # - DOMAIN-SUFFIX,中国,DIRECT
+  # - DOMAIN-SUFFIX,公司,DIRECT
+  # - DOMAIN-SUFFIX,网络,DIRECT
+
+  # ===== 兜底 =====
+  - GEOSITE,cn,DIRECT
+  - GEOSITE,geolocation-cn,DIRECT
+  - GEOIP,CN,DIRECT,no-resolve
+  - GEOSITE,geolocation-!cn,PROXY
+  - MATCH,PROXY
+
+rule-providers:
+  adblockmihomo:
+    type: http
+    behavior: domain
+    url: "https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockmihomo.yaml"
+    path: ./ruleset/adblockmihomo.yaml
+    interval: 86400
+
+  reject:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt"
+    path: ./ruleset/reject.yaml
+    interval: 86400
+
+  applications:
+    type: http
+    behavior: classical
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/applications.txt"
+    path: ./ruleset/applications.yaml
+    interval: 86400
+
+  private:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt"
+    path: ./ruleset/private.yaml
+    interval: 86400
+
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt"
+    path: ./ruleset/cncidr.yaml
+    interval: 86400
+
+  lancidr:
+    type: http
+    behavior: ipcidr
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt"
+    path: ./ruleset/lancidr.yaml
+    interval: 86400
+
+  direct:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt"
+    path: ./ruleset/direct.yaml
+    interval: 86400
