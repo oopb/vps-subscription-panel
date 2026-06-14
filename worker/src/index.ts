@@ -88,7 +88,7 @@ type ShadowrocketBundle = {
 
 const SESSION_COOKIE = "vps_sub_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
-const PASSWORD_ITERATIONS = 210000;
+const PASSWORD_ITERATIONS = 100000;
 const DEFAULT_TABLE: DisplayTable = {
   columns: ["协议", "服务器", "端口", "备注"],
   rows: [],
@@ -1352,6 +1352,9 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
     return false;
   }
   const iterations = Number(parts[1]);
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100000) {
+    return false;
+  }
   const salt = base64ToBytes(parts[2]);
   const expected = parts[3];
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
