@@ -40,4 +40,5 @@ CREATE INDEX IF NOT EXISTS idx_prefixes_enabled_sort ON subscription_prefixes(en
 INSERT OR IGNORE INTO settings(key, value) VALUES
   ('node_display_text', '登录后可在这里展示节点说明。管理员可以在后台任意编辑这段文字。'),
   ('node_display_table', '{"columns":["协议","服务器","端口","备注"],"rows":[]}'),
+  ('shadowrocket_use_base64', 'false'),
   ('ipv6_mapping', '{"107.173.127.179":["2001:470:c:117c::101","2001:470:c:117c::102","2001:470:c:117c::103","2001:470:c:117c::104","2001:470:c:117c::105","2001:470:c:117c::106"],"23.159.248.103":["2001:470:c:ef0::101","2001:470:c:ef0::102","2001:470:c:ef0::103","2001:470:c:ef0::104"]}');

@@ -84,6 +84,7 @@ type ShadowrocketBundle = {
   qrDataUrl: string | null;
   qrError: string | null;
   linkCount: number;
+  useBase64: boolean;
 };
 
 const SESSION_COOKIE = "vps_sub_session";
@@ -160,6 +161,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       shadowrocketQrDataUrl: result.shadowrocket.qrDataUrl,
       shadowrocketQrError: result.shadowrocket.qrError,
       shadowrocketLinkCount: result.shadowrocket.linkCount,
+      shadowrocketUseBase64: result.shadowrocket.useBase64,
     });
   }
 
@@ -197,6 +199,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const table = normalizeDisplayTable(body.table);
     await setSetting(env, "node_display_text", text);
     await setSetting(env, "node_display_table", JSON.stringify(table));
+    await setSetting(env, "shadowrocket_use_base64", boolField(body.shadowrocketUseBase64) ? "true" : "false");
     return jsonResponse(await getDisplayContent(env));
   }
 
@@ -457,16 +460,17 @@ async function countActiveAdmins(env: Env): Promise<number> {
   return row?.count || 0;
 }
 
-async function getDisplayContent(env: Env): Promise<{ text: string; table: DisplayTable }> {
+async function getDisplayContent(env: Env): Promise<{ text: string; table: DisplayTable; shadowrocketUseBase64: boolean }> {
   const text = await getSetting(env, "node_display_text", "");
   const tableRaw = await getSetting(env, "node_display_table", JSON.stringify(DEFAULT_TABLE));
+  const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
   let table = DEFAULT_TABLE;
   try {
     table = normalizeDisplayTable(JSON.parse(tableRaw));
   } catch {
     table = DEFAULT_TABLE;
   }
-  return { text, table };
+  return { text, table, shadowrocketUseBase64 };
 }
 
 async function getSetting(env: Env, key: string, fallback: string): Promise<string> {
@@ -577,14 +581,16 @@ async function generateConfigForUser(
   }
 
   if (nodes.length === 0) {
-    throw new HttpError(502, "没有从订阅源解析到节点");
+    const details = sources.map((source) => `${source.name}: ${source.error || "未解析到节点"}`).join("；");
+    throw new HttpError(502, details ? `没有从订阅源解析到节点。${details}` : "没有从订阅源解析到节点");
   }
 
   const mapped = appendIpv6Nodes(nodes, sourceEntries, await getIpv6Mapping(env));
   const uniqueNodes = dedupeNodeNames(mapped.nodes);
   const yaml = generateYaml(DEFAULT_TEMPLATE, uniqueNodes);
   const shadowrocketLinks = [...sourceEntries.map((entry) => entry.shareLink), ...mapped.ipv6Entries.map((entry) => entry.shareLink)];
-  const shadowrocket = buildShadowrocketBundle(shadowrocketLinks);
+  const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
+  const shadowrocket = buildShadowrocketBundle(shadowrocketLinks, shadowrocketUseBase64);
   return { yaml, nodeCount: uniqueNodes.length, sources, shadowrocket };
 }
 
@@ -626,7 +632,15 @@ async function fetchSubscription(name: string, url: string): Promise<FetchSubscr
     }
     const content = (await response.text()).trim();
     const parsed = parseSubscriptionContent(content);
-    return { name, url, ok: true, nodeCount: parsed.nodes.length, nodes: parsed.nodes, entries: parsed.entries };
+    return {
+      name,
+      url,
+      ok: true,
+      nodeCount: parsed.nodes.length,
+      nodes: parsed.nodes,
+      entries: parsed.entries,
+      error: parsed.nodes.length ? undefined : describeUnparsedContent(content, response.headers.get("content-type") || ""),
+    };
   } catch (error) {
     return {
       name,
@@ -641,13 +655,9 @@ async function fetchSubscription(name: string, url: string): Promise<FetchSubscr
 }
 
 function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
-  try {
-    const data = JSON.parse(content) as Record<string, unknown>;
-    if (Array.isArray(data.outbounds)) {
-      return { nodes: parseSingboxJson(data), entries: [] };
-    }
-  } catch {
-    // Continue with base64/plaintext parsing.
+  const rawJsonNodes = parseSingboxJsonContent(content);
+  if (rawJsonNodes.length) {
+    return { nodes: rawJsonNodes, entries: [] };
   }
 
   let decoded = content;
@@ -655,6 +665,16 @@ function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
     decoded = decodeBase64Utf8(content);
   } catch {
     decoded = content;
+  }
+
+  const decodedJsonNodes = decoded === content ? [] : parseSingboxJsonContent(decoded);
+  if (decodedJsonNodes.length) {
+    return { nodes: decodedJsonNodes, entries: [] };
+  }
+
+  const clashYamlNodes = parseClashYaml(decoded);
+  if (clashYamlNodes.length) {
+    return { nodes: clashYamlNodes, entries: [] };
   }
 
   const nodes: ProxyNode[] = [];
@@ -669,6 +689,119 @@ function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
     }
   }
   return { nodes, entries };
+}
+
+function parseSingboxJsonContent(content: string): ProxyNode[] {
+  try {
+    const data = JSON.parse(content) as Record<string, unknown>;
+    return Array.isArray(data.outbounds) ? parseSingboxJson(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+function describeUnparsedContent(content: string, contentType: string): string {
+  const sample = content.slice(0, 300).trim().toLowerCase();
+  if (contentType.includes("text/html") || sample.startsWith("<!doctype html") || sample.startsWith("<html")) {
+    return "订阅源返回的是 HTML 页面，不是订阅内容；请检查前缀是否填成了管理面板地址，应该使用真正的订阅接口";
+  }
+  if (!content) {
+    return "订阅源返回空内容";
+  }
+  if (sample.includes("login") || sample.includes("password")) {
+    return "订阅源看起来返回了登录页面，请检查订阅接口是否需要认证或前缀是否正确";
+  }
+  return "订阅源返回内容无法识别；当前支持原始节点链接、base64 节点链接列表、Sing-Box JSON、Clash/Mihomo YAML";
+}
+
+function parseClashYaml(content: string): ProxyNode[] {
+  if (!/^proxies:\s*$/m.test(content)) {
+    return [];
+  }
+
+  const block = extractRootBlock(content, "proxies");
+  const nodes: ProxyNode[] = [];
+  let current: ProxyNode | null = null;
+  let arrayKey: string | null = null;
+  let objectKey: string | null = null;
+
+  const pushCurrent = () => {
+    if (!current) return;
+    if (current.name && current.type && current.server) {
+      if (current.type === "hy2") current.type = "hysteria2";
+      nodes.push(current);
+    }
+  };
+
+  for (let i = 0; i < block.length; i += 1) {
+    const line = block[i];
+    const itemMatch = line.match(/^  -\s+(.+)$/);
+    if (itemMatch) {
+      pushCurrent();
+      current = { name: "undefined", type: "", server: "" };
+      arrayKey = null;
+      objectKey = null;
+      applyYamlPair(current, itemMatch[1]);
+      continue;
+    }
+
+    if (!current) continue;
+
+    const pairMatch = line.match(/^    ([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (pairMatch) {
+      const key = pairMatch[1];
+      const rawValue = pairMatch[2];
+      arrayKey = null;
+      objectKey = null;
+      if (rawValue === "") {
+        const next = block[i + 1] || "";
+        if (/^      -\s+/.test(next)) {
+          current[key] = [];
+          arrayKey = key;
+        } else {
+          current[key] = {};
+          objectKey = key;
+        }
+      } else {
+        current[key] = parseYamlValueForKey(key, rawValue);
+      }
+      continue;
+    }
+
+    const arrayMatch = line.match(/^      -\s+(.+)$/);
+    if (arrayMatch && arrayKey && Array.isArray(current[arrayKey])) {
+      (current[arrayKey] as string[]).push(String(parseYamlScalar(arrayMatch[1])));
+      continue;
+    }
+
+    const objectMatch = line.match(/^      ([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (objectMatch && objectKey && isRecord(current[objectKey])) {
+      (current[objectKey] as Record<string, unknown>)[objectMatch[1]] = parseYamlValueForKey(objectMatch[1], objectMatch[2]);
+    }
+  }
+
+  pushCurrent();
+  return nodes.filter((node) => ["vless", "tuic", "hysteria2", "trojan"].includes(node.type));
+}
+
+function applyYamlPair(target: ProxyNode, text: string): void {
+  const index = text.indexOf(":");
+  if (index === -1) return;
+  const key = text.slice(0, index).trim();
+  const rawValue = text.slice(index + 1).trim();
+  target[key] = parseYamlValueForKey(key, rawValue);
+}
+
+function parseYamlValueForKey(key: string, rawValue: string): unknown {
+  const value = parseYamlScalar(rawValue);
+  if (["port", "server_port"].includes(key)) {
+    const port = Number(value);
+    return Number.isFinite(port) ? port : value;
+  }
+  if (["udp", "tls", "skip-cert-verify", "fast-open"].includes(key)) {
+    return String(value).toLowerCase() === "true";
+  }
+  return value;
 }
 
 function parseSingboxJson(data: Record<string, unknown>): ProxyNode[] {
@@ -983,8 +1116,9 @@ function sanitizeNode(node: ProxyNode): Record<string, unknown> {
   };
 }
 
-function buildShadowrocketBundle(links: string[]): ShadowrocketBundle {
-  const text = links.join("\n");
+function buildShadowrocketBundle(links: string[], useBase64: boolean): ShadowrocketBundle {
+  const rawText = links.join("\n");
+  const text = useBase64 ? utf8ToBase64(rawText) : rawText;
   let qrDataUrl: string | null = null;
   let qrError: string | null = null;
 
@@ -996,7 +1130,9 @@ function buildShadowrocketBundle(links: string[]): ShadowrocketBundle {
       const svg = qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true });
       qrDataUrl = `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
     } catch {
-      qrError = "节点链接过多，单个二维码容量不足；请复制节点链接文本导入。";
+      qrError = useBase64
+        ? "节点链接过多，单个二维码容量不足；请复制 base64 文本导入。"
+        : "节点链接过多，单个二维码容量不足；请复制节点链接文本导入。";
     }
   }
 
@@ -1005,6 +1141,7 @@ function buildShadowrocketBundle(links: string[]): ShadowrocketBundle {
     qrDataUrl,
     qrError,
     linkCount: links.length,
+    useBase64,
   };
 }
 
@@ -1325,7 +1462,11 @@ function getNestedString(record: Record<string, unknown>, path: string[], fallba
 }
 
 function decodeBase64Utf8(input: string): string {
-  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const compact = input.trim().replace(/\s+/g, "");
+  if (!compact) {
+    throw new Error("empty base64");
+  }
+  const normalized = compact.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
@@ -1705,12 +1846,14 @@ const APP_HTML = String.raw`<!doctype html>
       shadowrocketQrDataUrl: "",
       shadowrocketQrError: "",
       shadowrocketLinkCount: 0,
+      shadowrocketUseBase64: false,
       admin: {
         users: [],
         prefixes: [],
         mappingText: "{}",
         contentText: "",
-        contentTable: { columns: [], rows: [] }
+        contentTable: { columns: [], rows: [] },
+        shadowrocketUseBase64: false
       }
     };
 
@@ -1836,11 +1979,11 @@ const APP_HTML = String.raw`<!doctype html>
         '<h2>生成订阅</h2>',
         '<div class="actions">',
         '<button id="generateBtn" class="primary">生成订阅文件</button>',
-        state.yaml ? '<button id="downloadBtn">下载 YAML</button><button id="copyBtn">复制 YAML</button><button id="copyShadowrocketBtn">复制节点链接</button>' : '',
+        state.yaml ? '<button id="downloadBtn">下载 YAML</button><button id="copyBtn">复制 YAML</button><button id="copyShadowrocketBtn">复制小火箭文本</button>' : '',
         '</div>',
         '</section>',
         state.sources.length ? '<section class="panel"><h2>订阅源</h2><div class="table-scroll"><table><thead>' + sourceHead + '</thead><tbody>' + sources + '</tbody></table></div></section>' : '',
-        state.shadowrocketText ? '<section class="panel"><h2>小火箭</h2>' + (state.shadowrocketQrDataUrl ? '<img alt="小火箭二维码" src="' + esc(state.shadowrocketQrDataUrl) + '" style="width: min(260px, 100%); height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px;">' : '') + (state.shadowrocketQrError ? '<div class="message error">' + esc(state.shadowrocketQrError) + '</div>' : '') + '<div class="message">已合并 ' + esc(state.shadowrocketLinkCount) + ' 个原始节点链接。</div><textarea id="shadowrocketBox" readonly>' + esc(state.shadowrocketText) + '</textarea></section>' : '',
+        state.shadowrocketText ? '<section class="panel"><h2>小火箭</h2>' + (state.shadowrocketQrDataUrl ? '<img alt="小火箭二维码" src="' + esc(state.shadowrocketQrDataUrl) + '" style="width: min(260px, 100%); height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px;">' : '') + (state.shadowrocketQrError ? '<div class="message error">' + esc(state.shadowrocketQrError) + '</div>' : '') + '<div class="message">已合并 ' + esc(state.shadowrocketLinkCount) + ' 个节点链接，当前模式：' + (state.shadowrocketUseBase64 ? 'Base64' : '原始链接') + '。</div><textarea id="shadowrocketBox" readonly>' + esc(state.shadowrocketText) + '</textarea></section>' : '',
         state.yaml ? '<section class="panel"><h2>YAML</h2><textarea id="yamlBox" readonly>' + esc(state.yaml) + '</textarea></section>' : ''
       ].join("");
     }
@@ -1904,6 +2047,10 @@ const APP_HTML = String.raw`<!doctype html>
 
     function renderContentTab() {
       return [
+        '<section class="panel">',
+        '<h2>小火箭输出</h2>',
+        '<label><span><input id="shadowrocketUseBase64" class="inline-check" type="checkbox" ' + (state.admin.shadowrocketUseBase64 ? "checked" : "") + '>使用 Base64 编码生成二维码和复制文本</span></label>',
+        '</section>',
         '<section class="panel">',
         '<h2>文字区域</h2>',
         '<textarea id="contentText">' + esc(state.admin.contentText) + '</textarea>',
@@ -2037,6 +2184,7 @@ const APP_HTML = String.raw`<!doctype html>
       state.admin.users = users.users;
       state.admin.contentText = content.text;
       state.admin.contentTable = content.table;
+      state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
       state.admin.mappingText = JSON.stringify(mapping.mapping, null, 2);
       state.admin.prefixes = prefixes.prefixes;
     }
@@ -2061,6 +2209,7 @@ const APP_HTML = String.raw`<!doctype html>
         state.shadowrocketQrDataUrl = data.shadowrocketQrDataUrl || "";
         state.shadowrocketQrError = data.shadowrocketQrError || "";
         state.shadowrocketLinkCount = data.shadowrocketLinkCount || 0;
+        state.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
         state.message = "订阅已生成，共 " + data.nodeCount + " 个节点。";
       } catch (error) {
         state.error = error.message;
@@ -2087,7 +2236,7 @@ const APP_HTML = String.raw`<!doctype html>
 
     async function copyShadowrocket() {
       await navigator.clipboard.writeText(state.shadowrocketText || "");
-      state.message = "节点链接已复制。";
+      state.message = state.shadowrocketUseBase64 ? "小火箭 Base64 已复制。" : "节点链接已复制。";
       render();
     }
 
@@ -2195,11 +2344,12 @@ const APP_HTML = String.raw`<!doctype html>
         try {
           var data = await api("/api/admin/content", {
             method: "PUT",
-            body: JSON.stringify({ text: document.getElementById("contentText").value, table: state.admin.contentTable })
+            body: JSON.stringify({ text: document.getElementById("contentText").value, table: state.admin.contentTable, shadowrocketUseBase64: state.admin.shadowrocketUseBase64 })
           });
           state.content = data;
           state.admin.contentText = data.text;
           state.admin.contentTable = data.table;
+          state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
           state.message = "展示内容已保存。";
           render();
         } catch (error) {
@@ -2212,6 +2362,8 @@ const APP_HTML = String.raw`<!doctype html>
     function syncEditableTable() {
       var text = document.getElementById("contentText");
       if (text) state.admin.contentText = text.value;
+      var useBase64 = document.getElementById("shadowrocketUseBase64");
+      if (useBase64) state.admin.shadowrocketUseBase64 = useBase64.checked;
       document.querySelectorAll(".col-name").forEach(function(input) {
         state.admin.contentTable.columns[Number(input.getAttribute("data-col"))] = input.value;
       });
