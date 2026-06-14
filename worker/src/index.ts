@@ -622,13 +622,9 @@ async function fetchSubscriptionsInBatches(
 
 async function fetchSubscription(name: string, url: string): Promise<FetchSubscriptionResult> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        "user-agent": "ClashMeta/1.0",
-      },
-    });
+    const response = await fetchSubscriptionWithRetries(url);
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(describeHttpError(response.status));
     }
     const content = (await response.text()).trim();
     const parsed = parseSubscriptionContent(content);
@@ -652,6 +648,57 @@ async function fetchSubscription(name: string, url: string): Promise<FetchSubscr
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+async function fetchSubscriptionWithRetries(url: string): Promise<Response> {
+  const headerProfiles: HeadersInit[] = [
+    {
+      "user-agent": "ClashMeta/1.0",
+      accept: "*/*",
+    },
+    {
+      "user-agent": "Shadowrocket/2.2.55 CFNetwork/1496.0.7 Darwin/23.5.0",
+      accept: "*/*",
+    },
+    {
+      "user-agent": "clash-verge/v2.0",
+      accept: "text/plain, application/json, application/yaml, */*",
+    },
+    {
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      accept: "text/plain, application/json, application/yaml, */*",
+    },
+  ];
+
+  let lastResponse: Response | null = null;
+  for (const headers of headerProfiles) {
+    const response = await fetch(url, { headers });
+    if (response.ok) {
+      return response;
+    }
+    lastResponse = response;
+    if (![401, 403, 406, 429].includes(response.status)) {
+      return response;
+    }
+  }
+
+  return lastResponse || fetch(url);
+}
+
+function describeHttpError(status: number): string {
+  if (status === 403) {
+    return "HTTP 403，源站拒绝 Cloudflare Worker 请求；请检查订阅接口是否限制 User-Agent、来源 IP、防火墙或访问路径";
+  }
+  if (status === 401) {
+    return "HTTP 401，订阅接口需要认证或用户名不正确";
+  }
+  if (status === 404) {
+    return "HTTP 404，订阅链接路径不存在，请检查前缀和用户订阅名拼接是否正确";
+  }
+  if (status === 429) {
+    return "HTTP 429，订阅源限流";
+  }
+  return `HTTP ${status}`;
 }
 
 function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
