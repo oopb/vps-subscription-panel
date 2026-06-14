@@ -41,4 +41,6 @@ INSERT OR IGNORE INTO settings(key, value) VALUES
   ('node_display_text', '登录后可在这里展示节点说明。管理员可以在后台任意编辑这段文字。'),
   ('node_display_table', '{"columns":["协议","服务器","端口","备注"],"rows":[]}'),
   ('shadowrocket_use_base64', 'false'),
+  ('subscription_fetch_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'),
+  ('subscription_fetch_referer', ''),
   ('ipv6_mapping', '{"107.173.127.179":["2001:470:c:117c::101","2001:470:c:117c::102","2001:470:c:117c::103","2001:470:c:117c::104","2001:470:c:117c::105","2001:470:c:117c::106"],"23.159.248.103":["2001:470:c:ef0::101","2001:470:c:ef0::102","2001:470:c:ef0::103","2001:470:c:ef0::104"]}');

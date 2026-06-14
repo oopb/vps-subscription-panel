@@ -38,6 +38,11 @@ type DisplayTable = {
   rows: Array<{ name: string; cells: string[] }>;
 };
 
+type SubscriptionFetchSettings = {
+  userAgent: string;
+  referer: string;
+};
+
 type SubscriptionPrefix = {
   id: number;
   name: string;
@@ -90,6 +95,8 @@ type ShadowrocketBundle = {
 const SESSION_COOKIE = "vps_sub_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 100000;
+const DEFAULT_SUBSCRIPTION_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const DEFAULT_TABLE: DisplayTable = {
   columns: ["协议", "服务器", "端口", "备注"],
   rows: [],
@@ -200,6 +207,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     await setSetting(env, "node_display_text", text);
     await setSetting(env, "node_display_table", JSON.stringify(table));
     await setSetting(env, "shadowrocket_use_base64", boolField(body.shadowrocketUseBase64) ? "true" : "false");
+    await setSetting(
+      env,
+      "subscription_fetch_user_agent",
+      optionalString(body.subscriptionFetchUserAgent) || DEFAULT_SUBSCRIPTION_USER_AGENT,
+    );
+    await setSetting(env, "subscription_fetch_referer", optionalString(body.subscriptionFetchReferer) || "");
     return jsonResponse(await getDisplayContent(env));
   }
 
@@ -460,22 +473,38 @@ async function countActiveAdmins(env: Env): Promise<number> {
   return row?.count || 0;
 }
 
-async function getDisplayContent(env: Env): Promise<{ text: string; table: DisplayTable; shadowrocketUseBase64: boolean }> {
+async function getDisplayContent(
+  env: Env,
+): Promise<{ text: string; table: DisplayTable; shadowrocketUseBase64: boolean; subscriptionFetchUserAgent: string; subscriptionFetchReferer: string }> {
   const text = await getSetting(env, "node_display_text", "");
   const tableRaw = await getSetting(env, "node_display_table", JSON.stringify(DEFAULT_TABLE));
   const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
+  const fetchSettings = await getSubscriptionFetchSettings(env);
   let table = DEFAULT_TABLE;
   try {
     table = normalizeDisplayTable(JSON.parse(tableRaw));
   } catch {
     table = DEFAULT_TABLE;
   }
-  return { text, table, shadowrocketUseBase64 };
+  return {
+    text,
+    table,
+    shadowrocketUseBase64,
+    subscriptionFetchUserAgent: fetchSettings.userAgent,
+    subscriptionFetchReferer: fetchSettings.referer,
+  };
 }
 
 async function getSetting(env: Env, key: string, fallback: string): Promise<string> {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   return row?.value ?? fallback;
+}
+
+async function getSubscriptionFetchSettings(env: Env): Promise<SubscriptionFetchSettings> {
+  return {
+    userAgent: await getSetting(env, "subscription_fetch_user_agent", DEFAULT_SUBSCRIPTION_USER_AGENT),
+    referer: await getSetting(env, "subscription_fetch_referer", ""),
+  };
 }
 
 async function setSetting(env: Env, key: string, value: string): Promise<void> {
@@ -563,7 +592,7 @@ async function generateConfigForUser(
     name: prefix.name,
     url: buildSubscriptionUrl(prefix.url_prefix, subscriptionName),
   }));
-  const fetched = await fetchSubscriptionsInBatches(jobs);
+  const fetched = await fetchSubscriptionsInBatches(jobs, await getSubscriptionFetchSettings(env));
   const sources: SourceStatus[] = [];
   const nodes: ProxyNode[] = [];
   const sourceEntries: ParsedNodeEntry[] = [];
@@ -610,19 +639,20 @@ function buildSubscriptionUrl(prefix: string, username: string): string {
 
 async function fetchSubscriptionsInBatches(
   jobs: Array<{ name: string; url: string }>,
+  settings: SubscriptionFetchSettings,
 ): Promise<FetchSubscriptionResult[]> {
   const results: FetchSubscriptionResult[] = [];
   for (let i = 0; i < jobs.length; i += 6) {
     const batch = jobs.slice(i, i + 6);
-    const settled = await Promise.all(batch.map((job) => fetchSubscription(job.name, job.url)));
+    const settled = await Promise.all(batch.map((job) => fetchSubscription(job.name, job.url, settings)));
     results.push(...settled);
   }
   return results;
 }
 
-async function fetchSubscription(name: string, url: string): Promise<FetchSubscriptionResult> {
+async function fetchSubscription(name: string, url: string, settings: SubscriptionFetchSettings): Promise<FetchSubscriptionResult> {
   try {
-    const response = await fetchSubscriptionWithRetries(url);
+    const response = await fetchSubscriptionWithRetries(url, settings);
     if (!response.ok) {
       throw new Error(describeHttpError(response.status));
     }
@@ -650,8 +680,10 @@ async function fetchSubscription(name: string, url: string): Promise<FetchSubscr
   }
 }
 
-async function fetchSubscriptionWithRetries(url: string): Promise<Response> {
+async function fetchSubscriptionWithRetries(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
   const headerProfiles: HeadersInit[] = [
+    buildBrowserSubscriptionHeaders(settings),
+    buildBrowserSubscriptionHeaders(settings, { accept: "*/*" }),
     {
       "user-agent": "ClashMeta/1.0",
       accept: "*/*",
@@ -666,13 +698,17 @@ async function fetchSubscriptionWithRetries(url: string): Promise<Response> {
     },
     {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
-      accept: "text/plain, application/json, application/yaml, */*",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.7,application/yaml;q=0.7,*/*;q=0.5",
+      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "cache-control": "no-cache",
+      pragma: "no-cache",
+      "upgrade-insecure-requests": "1",
     },
   ];
 
   let lastResponse: Response | null = null;
   for (const headers of headerProfiles) {
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, redirect: "follow" });
     if (response.ok) {
       return response;
     }
@@ -683,6 +719,27 @@ async function fetchSubscriptionWithRetries(url: string): Promise<Response> {
   }
 
   return lastResponse || fetch(url);
+}
+
+function buildBrowserSubscriptionHeaders(
+  settings: SubscriptionFetchSettings,
+  overrides: Record<string, string> = {},
+): HeadersInit {
+  const headers: Record<string, string> = {
+    "user-agent": settings.userAgent.trim() || DEFAULT_SUBSCRIPTION_USER_AGENT,
+    accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.7,application/yaml;q=0.7,*/*;q=0.5",
+    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "cache-control": "no-cache",
+    pragma: "no-cache",
+    "upgrade-insecure-requests": "1",
+    ...overrides,
+  };
+  const referer = settings.referer.trim();
+  if (referer) {
+    headers.referer = referer;
+  }
+  return headers;
 }
 
 function describeHttpError(status: number): string {
@@ -1900,7 +1957,9 @@ const APP_HTML = String.raw`<!doctype html>
         mappingText: "{}",
         contentText: "",
         contentTable: { columns: [], rows: [] },
-        shadowrocketUseBase64: false
+        shadowrocketUseBase64: false,
+        subscriptionFetchUserAgent: "",
+        subscriptionFetchReferer: ""
       }
     };
 
@@ -2097,6 +2156,10 @@ const APP_HTML = String.raw`<!doctype html>
         '<section class="panel">',
         '<h2>小火箭输出</h2>',
         '<label><span><input id="shadowrocketUseBase64" class="inline-check" type="checkbox" ' + (state.admin.shadowrocketUseBase64 ? "checked" : "") + '>使用 Base64 编码生成二维码和复制文本</span></label>',
+        '<div class="grid">',
+        '<label>订阅抓取 User-Agent<input id="subscriptionFetchUserAgent" value="' + esc(state.admin.subscriptionFetchUserAgent) + '"></label>',
+        '<label>订阅抓取 Referer<input id="subscriptionFetchReferer" value="' + esc(state.admin.subscriptionFetchReferer) + '" placeholder="可留空"></label>',
+        '</div>',
         '</section>',
         '<section class="panel">',
         '<h2>文字区域</h2>',
@@ -2232,6 +2295,8 @@ const APP_HTML = String.raw`<!doctype html>
       state.admin.contentText = content.text;
       state.admin.contentTable = content.table;
       state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
+      state.admin.subscriptionFetchUserAgent = content.subscriptionFetchUserAgent || "";
+      state.admin.subscriptionFetchReferer = content.subscriptionFetchReferer || "";
       state.admin.mappingText = JSON.stringify(mapping.mapping, null, 2);
       state.admin.prefixes = prefixes.prefixes;
     }
@@ -2391,12 +2456,20 @@ const APP_HTML = String.raw`<!doctype html>
         try {
           var data = await api("/api/admin/content", {
             method: "PUT",
-            body: JSON.stringify({ text: document.getElementById("contentText").value, table: state.admin.contentTable, shadowrocketUseBase64: state.admin.shadowrocketUseBase64 })
+            body: JSON.stringify({
+              text: document.getElementById("contentText").value,
+              table: state.admin.contentTable,
+              shadowrocketUseBase64: state.admin.shadowrocketUseBase64,
+              subscriptionFetchUserAgent: state.admin.subscriptionFetchUserAgent,
+              subscriptionFetchReferer: state.admin.subscriptionFetchReferer
+            })
           });
           state.content = data;
           state.admin.contentText = data.text;
           state.admin.contentTable = data.table;
           state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
+          state.admin.subscriptionFetchUserAgent = data.subscriptionFetchUserAgent || "";
+          state.admin.subscriptionFetchReferer = data.subscriptionFetchReferer || "";
           state.message = "展示内容已保存。";
           render();
         } catch (error) {
@@ -2411,6 +2484,10 @@ const APP_HTML = String.raw`<!doctype html>
       if (text) state.admin.contentText = text.value;
       var useBase64 = document.getElementById("shadowrocketUseBase64");
       if (useBase64) state.admin.shadowrocketUseBase64 = useBase64.checked;
+      var fetchUserAgent = document.getElementById("subscriptionFetchUserAgent");
+      if (fetchUserAgent) state.admin.subscriptionFetchUserAgent = fetchUserAgent.value;
+      var fetchReferer = document.getElementById("subscriptionFetchReferer");
+      if (fetchReferer) state.admin.subscriptionFetchReferer = fetchReferer.value;
       document.querySelectorAll(".col-name").forEach(function(input) {
         state.admin.contentTable.columns[Number(input.getAttribute("data-col"))] = input.value;
       });
