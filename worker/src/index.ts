@@ -660,7 +660,7 @@ async function fetchSubscription(name: string, url: string, settings: Subscripti
     const response = await fetchSubscriptionWithRetries(url, settings);
     const content = (await response.text()).trim();
     if (!response.ok) {
-      throw new Error(describeHttpError(response.status, content));
+      throw new Error(describeHttpErrorClean(response.status, content));
     }
     const parsed = parseSubscriptionContent(content);
     return {
@@ -703,12 +703,24 @@ async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetc
     headers.authorization = `Bearer ${token}`;
   }
 
-  return fetch(settings.relayUrl.trim(), {
+  const response = await fetch(settings.relayUrl.trim(), {
     method: "POST",
     headers,
     body: JSON.stringify({ url }),
     redirect: "follow",
   });
+  if (response.headers.get("x-vps-subscription-relay") !== "1") {
+    const body = await response.text();
+    return jsonResponse(
+      {
+        error:
+          "Relay 地址没有命中 VPS 中转服务。请检查 Relay 地址是否填成 https://你的域名/fetch 或 http://VPS真实IP:8788/fetch，且 /health 能返回 {\"ok\":true}" +
+          summarizeHttpErrorBodyClean(body),
+      },
+      502,
+    );
+  }
+  return response;
 }
 
 function describeHttpError(status: number, body = ""): string {
@@ -740,6 +752,37 @@ function summarizeHttpErrorBody(body: string): string {
   }
   const sample = text.replace(/\s+/g, " ").slice(0, 180);
   return sample ? `：${sample}` : "";
+}
+
+function describeHttpErrorClean(status: number, body = ""): string {
+  const detail = summarizeHttpErrorBodyClean(body);
+  if (status === 403) {
+    return `HTTP 403, source or relay refused the request. Check relay token, subscription permissions, source IP, firewall, or path${detail}`;
+  }
+  if (status === 401) {
+    return `HTTP 401, subscription source or relay requires authentication${detail}`;
+  }
+  if (status === 404) {
+    return `HTTP 404, subscription URL or relay path does not exist. Check prefix, subscription username, and relay address${detail}`;
+  }
+  if (status === 429) {
+    return `HTTP 429, subscription source or relay is rate limited${detail}`;
+  }
+  return `HTTP ${status}${detail}`;
+}
+
+function summarizeHttpErrorBodyClean(body: string): string {
+  const text = body.trim();
+  if (!text) return "";
+  try {
+    const data = JSON.parse(text) as Record<string, unknown>;
+    const error = typeof data.error === "string" ? data.error : "";
+    if (error) return `: ${error.slice(0, 180)}`;
+  } catch {
+    // Not JSON; fall through to a plain-text sample.
+  }
+  const sample = text.replace(/\s+/g, " ").slice(0, 180);
+  return sample ? `: ${sample}` : "";
 }
 
 function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
