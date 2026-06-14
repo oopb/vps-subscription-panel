@@ -1286,20 +1286,9 @@ function utf8ToBase64(value: string): string {
 }
 
 function generateYaml(template: string, nodes: ProxyNode[]): string {
-  const oldNames = extractOldProxyNames(template);
   const proxyNames = nodes.map((node) => node.name);
-  const withGroups = updateProxyGroups(template, oldNames, proxyNames);
+  const withGroups = updateProxyGroups(template, proxyNames);
   return replaceRootBlock(withGroups, "proxies", serializeProxyList(nodes));
-}
-
-function extractOldProxyNames(template: string): Set<string> {
-  const block = extractRootBlock(template, "proxies");
-  const names = new Set<string>();
-  for (const line of block) {
-    const match = line.match(/^\s*-\s+name:\s*(.+?)\s*$/);
-    if (match) names.add(parseYamlScalar(match[1]));
-  }
-  return names;
 }
 
 function extractRootBlock(template: string, key: string): string[] {
@@ -1332,7 +1321,7 @@ function replaceRootBlock(template: string, key: string, body: string): string {
   return [...lines.slice(0, start), `${key}:`, ...body.split("\n"), ...lines.slice(end)].join("\n").trimEnd() + "\n";
 }
 
-function updateProxyGroups(template: string, oldNodeNames: Set<string>, newNodeNames: string[]): string {
+function updateProxyGroups(template: string, newNodeNames: string[]): string {
   const lines = normalizeNewlines(template).split("\n");
   const start = lines.findIndex((line) => line === "proxy-groups:" || line.startsWith("proxy-groups: "));
   if (start === -1) return template;
@@ -1346,6 +1335,7 @@ function updateProxyGroups(template: string, oldNodeNames: Set<string>, newNodeN
 
   const output = [...lines.slice(0, start)];
   const block = lines.slice(start, end);
+  const groupNames = extractProxyGroupNames(block);
   for (let i = 0; i < block.length; i += 1) {
     const line = block[i];
     output.push(line);
@@ -1358,7 +1348,8 @@ function updateProxyGroups(template: string, oldNodeNames: Set<string>, newNodeN
       existing.push(parseYamlScalar(block[j].replace(/^      -\s+/, "")));
       j += 1;
     }
-    const merged = [...existing.filter((name) => !oldNodeNames.has(name)), ...newNodeNames];
+    const keep = existing.filter((name) => isProxyGroupReference(name, groupNames));
+    const merged = [...keep, ...newNodeNames];
     const deduped = [...new Set(merged)];
     for (const name of deduped) {
       output.push(`      - ${yamlScalar(name)}`);
@@ -1368,6 +1359,19 @@ function updateProxyGroups(template: string, oldNodeNames: Set<string>, newNodeN
 
   output.push(...lines.slice(end));
   return output.join("\n");
+}
+
+function extractProxyGroupNames(block: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const line of block) {
+    const match = line.match(/^  -\s+name:\s*(.+?)\s*$/);
+    if (match) names.add(parseYamlScalar(match[1]));
+  }
+  return names;
+}
+
+function isProxyGroupReference(name: string, groupNames: Set<string>): boolean {
+  return groupNames.has(name) || ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"].includes(name);
 }
 
 function serializeProxyList(nodes: ProxyNode[]): string {
