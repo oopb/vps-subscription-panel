@@ -45,6 +45,10 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
 ## 4. 配置首次管理员
 
+有两种方式，二选一即可。
+
+### 方式 A：用 Cloudflare Secret 自动创建
+
 远程环境用 Wrangler Secrets：
 
 ```bash
@@ -53,6 +57,16 @@ npx wrangler secret put ADMIN_PASSWORD
 ```
 
 建议首次登录后立刻在后台修改管理员密码。D1 已经有管理员后，这两个 Secret 不会再覆盖现有账号；确认账号可用后，也可以在 Cloudflare 控制台删除或轮换 `ADMIN_PASSWORD`。
+
+### 方式 B：直接写入 D1 管理员账号
+
+如果不想配置 `ADMIN_USERNAME` / `ADMIN_PASSWORD`，可以本地生成管理员 SQL：
+
+```bash
+npm run admin:sql -- admin your-strong-password
+```
+
+把输出的 SQL 复制到 Cloudflare D1 Console 执行。密码会以 PBKDF2-SHA256 加盐哈希写入 `users.password_hash`，不是明文；迭代次数使用 Cloudflare Workers WebCrypto 支持的 `100000`。
 
 本地开发可以复制示例：
 

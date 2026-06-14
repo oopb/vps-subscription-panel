@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build:vps": "esbuild src/node-server.ts --bundle --platform=node --format=esm --target=node20 --external:better-sqlite3 --loader:.yaml=text --loader:.sql=text --outfile=dist-node/server.js",
+    "start:vps": "node dist-node/server.js",
     "db:migrate:local": "wrangler d1 migrations apply vps_subscription_db --local",
     "db:migrate": "wrangler d1 migrations apply vps_subscription_db --remote",
     "admin:sql": "node scripts/admin-sql.mjs",
@@ -13,10 +15,14 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260601.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.9.3",
     "typescript": "^5.9.0",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.1",
+    "esbuild": "^0.28.1",
     "qrcode-generator": "^2.0.4"
   }
 }

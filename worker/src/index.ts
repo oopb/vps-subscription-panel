@@ -38,12 +38,6 @@ type DisplayTable = {
   rows: Array<{ name: string; cells: string[] }>;
 };
 
-type SubscriptionFetchSettings = {
-  relayEnabled: boolean;
-  relayUrl: string;
-  relayToken: string;
-};
-
 type SubscriptionPrefix = {
   id: number;
   name: string;
@@ -206,9 +200,6 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     await setSetting(env, "node_display_text", text);
     await setSetting(env, "node_display_table", JSON.stringify(table));
     await setSetting(env, "shadowrocket_use_base64", boolField(body.shadowrocketUseBase64) ? "true" : "false");
-    await setSetting(env, "subscription_relay_enabled", boolField(body.subscriptionRelayEnabled) ? "true" : "false");
-    await setSetting(env, "subscription_relay_url", optionalString(body.subscriptionRelayUrl) || "");
-    await setSetting(env, "subscription_relay_token", optionalString(body.subscriptionRelayToken) || "");
     return jsonResponse(await getDisplayContent(env));
   }
 
@@ -475,14 +466,10 @@ async function getDisplayContent(
   text: string;
   table: DisplayTable;
   shadowrocketUseBase64: boolean;
-  subscriptionRelayEnabled: boolean;
-  subscriptionRelayUrl: string;
-  subscriptionRelayToken: string;
 }> {
   const text = await getSetting(env, "node_display_text", "");
   const tableRaw = await getSetting(env, "node_display_table", JSON.stringify(DEFAULT_TABLE));
   const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
-  const fetchSettings = await getSubscriptionFetchSettings(env);
   let table = DEFAULT_TABLE;
   try {
     table = normalizeDisplayTable(JSON.parse(tableRaw));
@@ -493,23 +480,12 @@ async function getDisplayContent(
     text,
     table,
     shadowrocketUseBase64,
-    subscriptionRelayEnabled: fetchSettings.relayEnabled,
-    subscriptionRelayUrl: fetchSettings.relayUrl,
-    subscriptionRelayToken: fetchSettings.relayToken,
   };
 }
 
 async function getSetting(env: Env, key: string, fallback: string): Promise<string> {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   return row?.value ?? fallback;
-}
-
-async function getSubscriptionFetchSettings(env: Env): Promise<SubscriptionFetchSettings> {
-  return {
-    relayEnabled: (await getSetting(env, "subscription_relay_enabled", "false")) === "true",
-    relayUrl: await getSetting(env, "subscription_relay_url", ""),
-    relayToken: await getSetting(env, "subscription_relay_token", ""),
-  };
 }
 
 async function setSetting(env: Env, key: string, value: string): Promise<void> {
@@ -597,7 +573,7 @@ async function generateConfigForUser(
     name: prefix.name,
     url: buildSubscriptionUrl(prefix.url_prefix, subscriptionName),
   }));
-  const fetched = await fetchSubscriptionsInBatches(jobs, await getSubscriptionFetchSettings(env));
+  const fetched = await fetchSubscriptionsInBatches(jobs);
   const sources: SourceStatus[] = [];
   const nodes: ProxyNode[] = [];
   const sourceEntries: ParsedNodeEntry[] = [];
@@ -644,20 +620,19 @@ function buildSubscriptionUrl(prefix: string, username: string): string {
 
 async function fetchSubscriptionsInBatches(
   jobs: Array<{ name: string; url: string }>,
-  settings: SubscriptionFetchSettings,
 ): Promise<FetchSubscriptionResult[]> {
   const results: FetchSubscriptionResult[] = [];
   for (let i = 0; i < jobs.length; i += 6) {
     const batch = jobs.slice(i, i + 6);
-    const settled = await Promise.all(batch.map((job) => fetchSubscription(job.name, job.url, settings)));
+    const settled = await Promise.all(batch.map((job) => fetchSubscription(job.name, job.url)));
     results.push(...settled);
   }
   return results;
 }
 
-async function fetchSubscription(name: string, url: string, settings: SubscriptionFetchSettings): Promise<FetchSubscriptionResult> {
+async function fetchSubscription(name: string, url: string): Promise<FetchSubscriptionResult> {
   try {
-    const response = await fetchSubscriptionWithRetries(url, settings);
+    const response = await fetchSubscriptionWithRetries(url);
     const content = (await response.text()).trim();
     if (!response.ok) {
       throw new Error(describeHttpErrorClean(response.status, content));
@@ -685,31 +660,8 @@ async function fetchSubscription(name: string, url: string, settings: Subscripti
   }
 }
 
-async function fetchSubscriptionWithRetries(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
-  if (settings.relayEnabled && settings.relayUrl.trim()) {
-    return fetchSubscriptionViaRelay(url, settings);
-  }
-
+async function fetchSubscriptionWithRetries(url: string): Promise<Response> {
   return fetch(url, { redirect: "follow" });
-}
-
-async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "text/plain, application/json, application/yaml, */*",
-  };
-  const token = settings.relayToken.trim();
-  if (token) {
-    headers.authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(settings.relayUrl.trim(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ url }),
-    redirect: "follow",
-  });
-  return response;
 }
 
 function describeHttpError(status: number, body = ""): string {
@@ -746,16 +698,16 @@ function summarizeHttpErrorBody(body: string): string {
 function describeHttpErrorClean(status: number, body = ""): string {
   const detail = summarizeHttpErrorBodyClean(body);
   if (status === 403) {
-    return `HTTP 403, source or relay refused the request. Check relay token, subscription permissions, source IP, firewall, or path${detail}`;
+    return `HTTP 403, subscription source refused the request. Check subscription permissions, source IP, firewall, or path${detail}`;
   }
   if (status === 401) {
-    return `HTTP 401, subscription source or relay requires authentication${detail}`;
+    return `HTTP 401, subscription source requires authentication${detail}`;
   }
   if (status === 404) {
-    return `HTTP 404, subscription URL or relay path does not exist. Check prefix, subscription username, and relay address${detail}`;
+    return `HTTP 404, subscription URL does not exist. Check prefix and subscription username${detail}`;
   }
   if (status === 429) {
-    return `HTTP 429, subscription source or relay is rate limited${detail}`;
+    return `HTTP 429, subscription source is rate limited${detail}`;
   }
   return `HTTP ${status}${detail}`;
 }
@@ -1973,10 +1925,7 @@ const APP_HTML = String.raw`<!doctype html>
         mappingText: "{}",
         contentText: "",
         contentTable: { columns: [], rows: [] },
-        shadowrocketUseBase64: false,
-        subscriptionRelayEnabled: false,
-        subscriptionRelayUrl: "",
-        subscriptionRelayToken: ""
+        shadowrocketUseBase64: false
       }
     };
 
@@ -2175,14 +2124,6 @@ const APP_HTML = String.raw`<!doctype html>
         '<label><span><input id="shadowrocketUseBase64" class="inline-check" type="checkbox" ' + (state.admin.shadowrocketUseBase64 ? "checked" : "") + '>使用 Base64 编码生成二维码和复制文本</span></label>',
         '</section>',
         '<section class="panel">',
-        '<h2>订阅中转</h2>',
-        '<label><span><input id="subscriptionRelayEnabled" class="inline-check" type="checkbox" ' + (state.admin.subscriptionRelayEnabled ? "checked" : "") + '>启用 VPS 中转抓取</span></label>',
-        '<div class="grid">',
-        '<label>Relay 地址<input id="subscriptionRelayUrl" value="' + esc(state.admin.subscriptionRelayUrl) + '" placeholder="https://relay.example.com/fetch"></label>',
-        '<label>Relay 密钥<input id="subscriptionRelayToken" type="password" value="' + esc(state.admin.subscriptionRelayToken) + '"></label>',
-        '</div>',
-        '</section>',
-        '<section class="panel">',
         '<h2>文字区域</h2>',
         '<textarea id="contentText">' + esc(state.admin.contentText) + '</textarea>',
         '</section>',
@@ -2316,9 +2257,6 @@ const APP_HTML = String.raw`<!doctype html>
       state.admin.contentText = content.text;
       state.admin.contentTable = content.table;
       state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
-      state.admin.subscriptionRelayEnabled = !!content.subscriptionRelayEnabled;
-      state.admin.subscriptionRelayUrl = content.subscriptionRelayUrl || "";
-      state.admin.subscriptionRelayToken = content.subscriptionRelayToken || "";
       state.admin.mappingText = JSON.stringify(mapping.mapping, null, 2);
       state.admin.prefixes = prefixes.prefixes;
     }
@@ -2481,19 +2419,13 @@ const APP_HTML = String.raw`<!doctype html>
             body: JSON.stringify({
               text: document.getElementById("contentText").value,
               table: state.admin.contentTable,
-              shadowrocketUseBase64: state.admin.shadowrocketUseBase64,
-              subscriptionRelayEnabled: state.admin.subscriptionRelayEnabled,
-              subscriptionRelayUrl: state.admin.subscriptionRelayUrl,
-              subscriptionRelayToken: state.admin.subscriptionRelayToken
+              shadowrocketUseBase64: state.admin.shadowrocketUseBase64
             })
           });
           state.content = data;
           state.admin.contentText = data.text;
           state.admin.contentTable = data.table;
           state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
-          state.admin.subscriptionRelayEnabled = !!data.subscriptionRelayEnabled;
-          state.admin.subscriptionRelayUrl = data.subscriptionRelayUrl || "";
-          state.admin.subscriptionRelayToken = data.subscriptionRelayToken || "";
           state.message = "展示内容已保存。";
           render();
         } catch (error) {
@@ -2508,12 +2440,6 @@ const APP_HTML = String.raw`<!doctype html>
       if (text) state.admin.contentText = text.value;
       var useBase64 = document.getElementById("shadowrocketUseBase64");
       if (useBase64) state.admin.shadowrocketUseBase64 = useBase64.checked;
-      var relayEnabled = document.getElementById("subscriptionRelayEnabled");
-      if (relayEnabled) state.admin.subscriptionRelayEnabled = relayEnabled.checked;
-      var relayUrl = document.getElementById("subscriptionRelayUrl");
-      if (relayUrl) state.admin.subscriptionRelayUrl = relayUrl.value;
-      var relayToken = document.getElementById("subscriptionRelayToken");
-      if (relayToken) state.admin.subscriptionRelayToken = relayToken.value;
       document.querySelectorAll(".col-name").forEach(function(input) {
         state.admin.contentTable.columns[Number(input.getAttribute("data-col"))] = input.value;
       });
