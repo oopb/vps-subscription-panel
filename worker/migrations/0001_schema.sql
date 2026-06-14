@@ -41,8 +41,6 @@ INSERT OR IGNORE INTO settings(key, value) VALUES
   ('node_display_text', '登录后可在这里展示节点说明。管理员可以在后台任意编辑这段文字。'),
   ('node_display_table', '{"columns":["协议","服务器","端口","备注"],"rows":[]}'),
   ('shadowrocket_use_base64', 'false'),
-  ('subscription_fetch_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'),
-  ('subscription_fetch_referer', ''),
   ('subscription_relay_enabled', 'false'),
   ('subscription_relay_url', ''),
   ('subscription_relay_token', ''),

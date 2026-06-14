@@ -39,8 +39,6 @@ type DisplayTable = {
 };
 
 type SubscriptionFetchSettings = {
-  userAgent: string;
-  referer: string;
   relayEnabled: boolean;
   relayUrl: string;
   relayToken: string;
@@ -98,8 +96,6 @@ type ShadowrocketBundle = {
 const SESSION_COOKIE = "vps_sub_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 100000;
-const DEFAULT_SUBSCRIPTION_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const DEFAULT_TABLE: DisplayTable = {
   columns: ["协议", "服务器", "端口", "备注"],
   rows: [],
@@ -210,12 +206,6 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     await setSetting(env, "node_display_text", text);
     await setSetting(env, "node_display_table", JSON.stringify(table));
     await setSetting(env, "shadowrocket_use_base64", boolField(body.shadowrocketUseBase64) ? "true" : "false");
-    await setSetting(
-      env,
-      "subscription_fetch_user_agent",
-      optionalString(body.subscriptionFetchUserAgent) || DEFAULT_SUBSCRIPTION_USER_AGENT,
-    );
-    await setSetting(env, "subscription_fetch_referer", optionalString(body.subscriptionFetchReferer) || "");
     await setSetting(env, "subscription_relay_enabled", boolField(body.subscriptionRelayEnabled) ? "true" : "false");
     await setSetting(env, "subscription_relay_url", optionalString(body.subscriptionRelayUrl) || "");
     await setSetting(env, "subscription_relay_token", optionalString(body.subscriptionRelayToken) || "");
@@ -485,8 +475,6 @@ async function getDisplayContent(
   text: string;
   table: DisplayTable;
   shadowrocketUseBase64: boolean;
-  subscriptionFetchUserAgent: string;
-  subscriptionFetchReferer: string;
   subscriptionRelayEnabled: boolean;
   subscriptionRelayUrl: string;
   subscriptionRelayToken: string;
@@ -505,8 +493,6 @@ async function getDisplayContent(
     text,
     table,
     shadowrocketUseBase64,
-    subscriptionFetchUserAgent: fetchSettings.userAgent,
-    subscriptionFetchReferer: fetchSettings.referer,
     subscriptionRelayEnabled: fetchSettings.relayEnabled,
     subscriptionRelayUrl: fetchSettings.relayUrl,
     subscriptionRelayToken: fetchSettings.relayToken,
@@ -520,8 +506,6 @@ async function getSetting(env: Env, key: string, fallback: string): Promise<stri
 
 async function getSubscriptionFetchSettings(env: Env): Promise<SubscriptionFetchSettings> {
   return {
-    userAgent: await getSetting(env, "subscription_fetch_user_agent", DEFAULT_SUBSCRIPTION_USER_AGENT),
-    referer: await getSetting(env, "subscription_fetch_referer", ""),
     relayEnabled: (await getSetting(env, "subscription_relay_enabled", "false")) === "true",
     relayUrl: await getSetting(env, "subscription_relay_url", ""),
     relayToken: await getSetting(env, "subscription_relay_token", ""),
@@ -706,44 +690,7 @@ async function fetchSubscriptionWithRetries(url: string, settings: SubscriptionF
     return fetchSubscriptionViaRelay(url, settings);
   }
 
-  const headerProfiles: HeadersInit[] = [
-    buildBrowserSubscriptionHeaders(settings),
-    buildBrowserSubscriptionHeaders(settings, { accept: "*/*" }),
-    {
-      "user-agent": "ClashMeta/1.0",
-      accept: "*/*",
-    },
-    {
-      "user-agent": "Shadowrocket/2.2.55 CFNetwork/1496.0.7 Darwin/23.5.0",
-      accept: "*/*",
-    },
-    {
-      "user-agent": "clash-verge/v2.0",
-      accept: "text/plain, application/json, application/yaml, */*",
-    },
-    {
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.7,application/yaml;q=0.7,*/*;q=0.5",
-      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-      "cache-control": "no-cache",
-      pragma: "no-cache",
-      "upgrade-insecure-requests": "1",
-    },
-  ];
-
-  let lastResponse: Response | null = null;
-  for (const headers of headerProfiles) {
-    const response = await fetch(url, { headers, redirect: "follow" });
-    if (response.ok) {
-      return response;
-    }
-    lastResponse = response;
-    if (![401, 403, 406, 429].includes(response.status)) {
-      return response;
-    }
-  }
-
-  return lastResponse || fetch(url);
+  return fetch(url, { redirect: "follow" });
 }
 
 async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
@@ -759,34 +706,9 @@ async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetc
   return fetch(settings.relayUrl.trim(), {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      url,
-      userAgent: settings.userAgent.trim() || DEFAULT_SUBSCRIPTION_USER_AGENT,
-      referer: settings.referer.trim(),
-    }),
+    body: JSON.stringify({ url }),
     redirect: "follow",
   });
-}
-
-function buildBrowserSubscriptionHeaders(
-  settings: SubscriptionFetchSettings,
-  overrides: Record<string, string> = {},
-): HeadersInit {
-  const headers: Record<string, string> = {
-    "user-agent": settings.userAgent.trim() || DEFAULT_SUBSCRIPTION_USER_AGENT,
-    accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.7,application/yaml;q=0.7,*/*;q=0.5",
-    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "cache-control": "no-cache",
-    pragma: "no-cache",
-    "upgrade-insecure-requests": "1",
-    ...overrides,
-  };
-  const referer = settings.referer.trim();
-  if (referer) {
-    headers.referer = referer;
-  }
-  return headers;
 }
 
 function describeHttpError(status: number, body = ""): string {
@@ -2020,8 +1942,6 @@ const APP_HTML = String.raw`<!doctype html>
         contentText: "",
         contentTable: { columns: [], rows: [] },
         shadowrocketUseBase64: false,
-        subscriptionFetchUserAgent: "",
-        subscriptionFetchReferer: "",
         subscriptionRelayEnabled: false,
         subscriptionRelayUrl: "",
         subscriptionRelayToken: ""
@@ -2221,10 +2141,6 @@ const APP_HTML = String.raw`<!doctype html>
         '<section class="panel">',
         '<h2>小火箭输出</h2>',
         '<label><span><input id="shadowrocketUseBase64" class="inline-check" type="checkbox" ' + (state.admin.shadowrocketUseBase64 ? "checked" : "") + '>使用 Base64 编码生成二维码和复制文本</span></label>',
-        '<div class="grid">',
-        '<label>订阅抓取 User-Agent<input id="subscriptionFetchUserAgent" value="' + esc(state.admin.subscriptionFetchUserAgent) + '"></label>',
-        '<label>订阅抓取 Referer<input id="subscriptionFetchReferer" value="' + esc(state.admin.subscriptionFetchReferer) + '" placeholder="可留空"></label>',
-        '</div>',
         '</section>',
         '<section class="panel">',
         '<h2>订阅中转</h2>',
@@ -2368,8 +2284,6 @@ const APP_HTML = String.raw`<!doctype html>
       state.admin.contentText = content.text;
       state.admin.contentTable = content.table;
       state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
-      state.admin.subscriptionFetchUserAgent = content.subscriptionFetchUserAgent || "";
-      state.admin.subscriptionFetchReferer = content.subscriptionFetchReferer || "";
       state.admin.subscriptionRelayEnabled = !!content.subscriptionRelayEnabled;
       state.admin.subscriptionRelayUrl = content.subscriptionRelayUrl || "";
       state.admin.subscriptionRelayToken = content.subscriptionRelayToken || "";
@@ -2536,8 +2450,6 @@ const APP_HTML = String.raw`<!doctype html>
               text: document.getElementById("contentText").value,
               table: state.admin.contentTable,
               shadowrocketUseBase64: state.admin.shadowrocketUseBase64,
-              subscriptionFetchUserAgent: state.admin.subscriptionFetchUserAgent,
-              subscriptionFetchReferer: state.admin.subscriptionFetchReferer,
               subscriptionRelayEnabled: state.admin.subscriptionRelayEnabled,
               subscriptionRelayUrl: state.admin.subscriptionRelayUrl,
               subscriptionRelayToken: state.admin.subscriptionRelayToken
@@ -2547,8 +2459,6 @@ const APP_HTML = String.raw`<!doctype html>
           state.admin.contentText = data.text;
           state.admin.contentTable = data.table;
           state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
-          state.admin.subscriptionFetchUserAgent = data.subscriptionFetchUserAgent || "";
-          state.admin.subscriptionFetchReferer = data.subscriptionFetchReferer || "";
           state.admin.subscriptionRelayEnabled = !!data.subscriptionRelayEnabled;
           state.admin.subscriptionRelayUrl = data.subscriptionRelayUrl || "";
           state.admin.subscriptionRelayToken = data.subscriptionRelayToken || "";
@@ -2566,10 +2476,6 @@ const APP_HTML = String.raw`<!doctype html>
       if (text) state.admin.contentText = text.value;
       var useBase64 = document.getElementById("shadowrocketUseBase64");
       if (useBase64) state.admin.shadowrocketUseBase64 = useBase64.checked;
-      var fetchUserAgent = document.getElementById("subscriptionFetchUserAgent");
-      if (fetchUserAgent) state.admin.subscriptionFetchUserAgent = fetchUserAgent.value;
-      var fetchReferer = document.getElementById("subscriptionFetchReferer");
-      if (fetchReferer) state.admin.subscriptionFetchReferer = fetchReferer.value;
       var relayEnabled = document.getElementById("subscriptionRelayEnabled");
       if (relayEnabled) state.admin.subscriptionRelayEnabled = relayEnabled.checked;
       var relayUrl = document.getElementById("subscriptionRelayUrl");
