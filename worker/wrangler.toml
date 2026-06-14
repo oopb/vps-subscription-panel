@@ -9,4 +9,4 @@ rules = [
 [[d1_databases]]
 binding = "DB"
 database_name = "vps_subscription_db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "00ec4f0c-6405-4eb0-ae6a-63ea0f7b122c"
