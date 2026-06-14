@@ -43,4 +43,7 @@ INSERT OR IGNORE INTO settings(key, value) VALUES
   ('shadowrocket_use_base64', 'false'),
   ('subscription_fetch_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'),
   ('subscription_fetch_referer', ''),
+  ('subscription_relay_enabled', 'false'),
+  ('subscription_relay_url', ''),
+  ('subscription_relay_token', ''),
   ('ipv6_mapping', '{"107.173.127.179":["2001:470:c:117c::101","2001:470:c:117c::102","2001:470:c:117c::103","2001:470:c:117c::104","2001:470:c:117c::105","2001:470:c:117c::106"],"23.159.248.103":["2001:470:c:ef0::101","2001:470:c:ef0::102","2001:470:c:ef0::103","2001:470:c:ef0::104"]}');

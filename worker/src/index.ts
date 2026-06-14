@@ -41,6 +41,9 @@ type DisplayTable = {
 type SubscriptionFetchSettings = {
   userAgent: string;
   referer: string;
+  relayEnabled: boolean;
+  relayUrl: string;
+  relayToken: string;
 };
 
 type SubscriptionPrefix = {
@@ -213,6 +216,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       optionalString(body.subscriptionFetchUserAgent) || DEFAULT_SUBSCRIPTION_USER_AGENT,
     );
     await setSetting(env, "subscription_fetch_referer", optionalString(body.subscriptionFetchReferer) || "");
+    await setSetting(env, "subscription_relay_enabled", boolField(body.subscriptionRelayEnabled) ? "true" : "false");
+    await setSetting(env, "subscription_relay_url", optionalString(body.subscriptionRelayUrl) || "");
+    await setSetting(env, "subscription_relay_token", optionalString(body.subscriptionRelayToken) || "");
     return jsonResponse(await getDisplayContent(env));
   }
 
@@ -475,7 +481,16 @@ async function countActiveAdmins(env: Env): Promise<number> {
 
 async function getDisplayContent(
   env: Env,
-): Promise<{ text: string; table: DisplayTable; shadowrocketUseBase64: boolean; subscriptionFetchUserAgent: string; subscriptionFetchReferer: string }> {
+): Promise<{
+  text: string;
+  table: DisplayTable;
+  shadowrocketUseBase64: boolean;
+  subscriptionFetchUserAgent: string;
+  subscriptionFetchReferer: string;
+  subscriptionRelayEnabled: boolean;
+  subscriptionRelayUrl: string;
+  subscriptionRelayToken: string;
+}> {
   const text = await getSetting(env, "node_display_text", "");
   const tableRaw = await getSetting(env, "node_display_table", JSON.stringify(DEFAULT_TABLE));
   const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
@@ -492,6 +507,9 @@ async function getDisplayContent(
     shadowrocketUseBase64,
     subscriptionFetchUserAgent: fetchSettings.userAgent,
     subscriptionFetchReferer: fetchSettings.referer,
+    subscriptionRelayEnabled: fetchSettings.relayEnabled,
+    subscriptionRelayUrl: fetchSettings.relayUrl,
+    subscriptionRelayToken: fetchSettings.relayToken,
   };
 }
 
@@ -504,6 +522,9 @@ async function getSubscriptionFetchSettings(env: Env): Promise<SubscriptionFetch
   return {
     userAgent: await getSetting(env, "subscription_fetch_user_agent", DEFAULT_SUBSCRIPTION_USER_AGENT),
     referer: await getSetting(env, "subscription_fetch_referer", ""),
+    relayEnabled: (await getSetting(env, "subscription_relay_enabled", "false")) === "true",
+    relayUrl: await getSetting(env, "subscription_relay_url", ""),
+    relayToken: await getSetting(env, "subscription_relay_token", ""),
   };
 }
 
@@ -653,10 +674,10 @@ async function fetchSubscriptionsInBatches(
 async function fetchSubscription(name: string, url: string, settings: SubscriptionFetchSettings): Promise<FetchSubscriptionResult> {
   try {
     const response = await fetchSubscriptionWithRetries(url, settings);
-    if (!response.ok) {
-      throw new Error(describeHttpError(response.status));
-    }
     const content = (await response.text()).trim();
+    if (!response.ok) {
+      throw new Error(describeHttpError(response.status, content));
+    }
     const parsed = parseSubscriptionContent(content);
     return {
       name,
@@ -681,6 +702,10 @@ async function fetchSubscription(name: string, url: string, settings: Subscripti
 }
 
 async function fetchSubscriptionWithRetries(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
+  if (settings.relayEnabled && settings.relayUrl.trim()) {
+    return fetchSubscriptionViaRelay(url, settings);
+  }
+
   const headerProfiles: HeadersInit[] = [
     buildBrowserSubscriptionHeaders(settings),
     buildBrowserSubscriptionHeaders(settings, { accept: "*/*" }),
@@ -721,6 +746,28 @@ async function fetchSubscriptionWithRetries(url: string, settings: SubscriptionF
   return lastResponse || fetch(url);
 }
 
+async function fetchSubscriptionViaRelay(url: string, settings: SubscriptionFetchSettings): Promise<Response> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "text/plain, application/json, application/yaml, */*",
+  };
+  const token = settings.relayToken.trim();
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  return fetch(settings.relayUrl.trim(), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      url,
+      userAgent: settings.userAgent.trim() || DEFAULT_SUBSCRIPTION_USER_AGENT,
+      referer: settings.referer.trim(),
+    }),
+    redirect: "follow",
+  });
+}
+
 function buildBrowserSubscriptionHeaders(
   settings: SubscriptionFetchSettings,
   overrides: Record<string, string> = {},
@@ -742,20 +789,35 @@ function buildBrowserSubscriptionHeaders(
   return headers;
 }
 
-function describeHttpError(status: number): string {
+function describeHttpError(status: number, body = ""): string {
+  const detail = summarizeHttpErrorBody(body);
   if (status === 403) {
-    return "HTTP 403，源站拒绝 Cloudflare Worker 请求；请检查订阅接口是否限制 User-Agent、来源 IP、防火墙或访问路径";
+    return `HTTP 403，源站或中转拒绝请求；请检查 relay token、订阅接口权限、来源 IP、防火墙或访问路径${detail}`;
   }
   if (status === 401) {
-    return "HTTP 401，订阅接口需要认证或用户名不正确";
+    return `HTTP 401，订阅接口或中转需要认证${detail}`;
   }
   if (status === 404) {
-    return "HTTP 404，订阅链接路径不存在，请检查前缀和用户订阅名拼接是否正确";
+    return `HTTP 404，订阅链接或中转路径不存在，请检查前缀、用户订阅名和 relay 地址${detail}`;
   }
   if (status === 429) {
-    return "HTTP 429，订阅源限流";
+    return `HTTP 429，订阅源或中转限流${detail}`;
   }
-  return `HTTP ${status}`;
+  return `HTTP ${status}${detail}`;
+}
+
+function summarizeHttpErrorBody(body: string): string {
+  const text = body.trim();
+  if (!text) return "";
+  try {
+    const data = JSON.parse(text) as Record<string, unknown>;
+    const error = typeof data.error === "string" ? data.error : "";
+    if (error) return `：${error.slice(0, 180)}`;
+  } catch {
+    // Not JSON; fall through to a plain-text sample.
+  }
+  const sample = text.replace(/\s+/g, " ").slice(0, 180);
+  return sample ? `：${sample}` : "";
 }
 
 function parseSubscriptionContent(content: string): ParsedSubscriptionContent {
@@ -1959,7 +2021,10 @@ const APP_HTML = String.raw`<!doctype html>
         contentTable: { columns: [], rows: [] },
         shadowrocketUseBase64: false,
         subscriptionFetchUserAgent: "",
-        subscriptionFetchReferer: ""
+        subscriptionFetchReferer: "",
+        subscriptionRelayEnabled: false,
+        subscriptionRelayUrl: "",
+        subscriptionRelayToken: ""
       }
     };
 
@@ -2162,6 +2227,14 @@ const APP_HTML = String.raw`<!doctype html>
         '</div>',
         '</section>',
         '<section class="panel">',
+        '<h2>订阅中转</h2>',
+        '<label><span><input id="subscriptionRelayEnabled" class="inline-check" type="checkbox" ' + (state.admin.subscriptionRelayEnabled ? "checked" : "") + '>启用 VPS 中转抓取</span></label>',
+        '<div class="grid">',
+        '<label>Relay 地址<input id="subscriptionRelayUrl" value="' + esc(state.admin.subscriptionRelayUrl) + '" placeholder="https://relay.example.com/fetch"></label>',
+        '<label>Relay 密钥<input id="subscriptionRelayToken" type="password" value="' + esc(state.admin.subscriptionRelayToken) + '"></label>',
+        '</div>',
+        '</section>',
+        '<section class="panel">',
         '<h2>文字区域</h2>',
         '<textarea id="contentText">' + esc(state.admin.contentText) + '</textarea>',
         '</section>',
@@ -2297,6 +2370,9 @@ const APP_HTML = String.raw`<!doctype html>
       state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
       state.admin.subscriptionFetchUserAgent = content.subscriptionFetchUserAgent || "";
       state.admin.subscriptionFetchReferer = content.subscriptionFetchReferer || "";
+      state.admin.subscriptionRelayEnabled = !!content.subscriptionRelayEnabled;
+      state.admin.subscriptionRelayUrl = content.subscriptionRelayUrl || "";
+      state.admin.subscriptionRelayToken = content.subscriptionRelayToken || "";
       state.admin.mappingText = JSON.stringify(mapping.mapping, null, 2);
       state.admin.prefixes = prefixes.prefixes;
     }
@@ -2461,7 +2537,10 @@ const APP_HTML = String.raw`<!doctype html>
               table: state.admin.contentTable,
               shadowrocketUseBase64: state.admin.shadowrocketUseBase64,
               subscriptionFetchUserAgent: state.admin.subscriptionFetchUserAgent,
-              subscriptionFetchReferer: state.admin.subscriptionFetchReferer
+              subscriptionFetchReferer: state.admin.subscriptionFetchReferer,
+              subscriptionRelayEnabled: state.admin.subscriptionRelayEnabled,
+              subscriptionRelayUrl: state.admin.subscriptionRelayUrl,
+              subscriptionRelayToken: state.admin.subscriptionRelayToken
             })
           });
           state.content = data;
@@ -2470,6 +2549,9 @@ const APP_HTML = String.raw`<!doctype html>
           state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
           state.admin.subscriptionFetchUserAgent = data.subscriptionFetchUserAgent || "";
           state.admin.subscriptionFetchReferer = data.subscriptionFetchReferer || "";
+          state.admin.subscriptionRelayEnabled = !!data.subscriptionRelayEnabled;
+          state.admin.subscriptionRelayUrl = data.subscriptionRelayUrl || "";
+          state.admin.subscriptionRelayToken = data.subscriptionRelayToken || "";
           state.message = "展示内容已保存。";
           render();
         } catch (error) {
@@ -2488,6 +2570,12 @@ const APP_HTML = String.raw`<!doctype html>
       if (fetchUserAgent) state.admin.subscriptionFetchUserAgent = fetchUserAgent.value;
       var fetchReferer = document.getElementById("subscriptionFetchReferer");
       if (fetchReferer) state.admin.subscriptionFetchReferer = fetchReferer.value;
+      var relayEnabled = document.getElementById("subscriptionRelayEnabled");
+      if (relayEnabled) state.admin.subscriptionRelayEnabled = relayEnabled.checked;
+      var relayUrl = document.getElementById("subscriptionRelayUrl");
+      if (relayUrl) state.admin.subscriptionRelayUrl = relayUrl.value;
+      var relayToken = document.getElementById("subscriptionRelayToken");
+      if (relayToken) state.admin.subscriptionRelayToken = relayToken.value;
       document.querySelectorAll(".col-name").forEach(function(input) {
         state.admin.contentTable.columns[Number(input.getAttribute("data-col"))] = input.value;
       });
