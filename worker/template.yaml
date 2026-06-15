@@ -215,7 +215,7 @@ proxy-groups:
       - DIRECT
 
     url: https://www.gstatic.com/generate_204
-    interval: 300
+
 
 rules:
   # 核心优化：强制阿里系应用放弃 QUIC (UDP 443)，瞬间回退 TCP 解决转圈慢的问题
