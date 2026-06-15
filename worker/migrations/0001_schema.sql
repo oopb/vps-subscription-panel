@@ -38,6 +38,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_prefixes_enabled_sort ON subscription_prefixes(enabled, sort_order);
 
 INSERT OR IGNORE INTO settings(key, value) VALUES
+  ('node_display_text_title', '节点文字'),
+  ('node_display_table_title', '节点表格'),
   ('node_display_text', '登录后可在这里展示节点说明。管理员可以在后台任意编辑这段文字。'),
   ('node_display_table', '{"columns":["协议","服务器","端口","备注"],"rows":[]}'),
   ('shadowrocket_use_base64', 'false'),

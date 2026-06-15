@@ -90,6 +90,8 @@ type ShadowrocketBundle = {
 const SESSION_COOKIE = "vps_sub_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 100000;
+const DEFAULT_TEXT_TITLE = "节点文字";
+const DEFAULT_TABLE_TITLE = "节点表格";
 const DEFAULT_TABLE: DisplayTable = {
   columns: ["协议", "服务器", "端口", "备注"],
   rows: [],
@@ -195,8 +197,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/admin/content" && request.method === "PUT") {
     const body = await readJson<Record<string, unknown>>(request);
+    const textTitle = typeof body.textTitle === "string" ? body.textTitle : DEFAULT_TEXT_TITLE;
+    const tableTitle = typeof body.tableTitle === "string" ? body.tableTitle : DEFAULT_TABLE_TITLE;
     const text = typeof body.text === "string" ? body.text : "";
     const table = normalizeDisplayTable(body.table);
+    await setSetting(env, "node_display_text_title", textTitle);
+    await setSetting(env, "node_display_table_title", tableTitle);
     await setSetting(env, "node_display_text", text);
     await setSetting(env, "node_display_table", JSON.stringify(table));
     await setSetting(env, "shadowrocket_use_base64", boolField(body.shadowrocketUseBase64) ? "true" : "false");
@@ -463,10 +469,14 @@ async function countActiveAdmins(env: Env): Promise<number> {
 async function getDisplayContent(
   env: Env,
 ): Promise<{
+  textTitle: string;
+  tableTitle: string;
   text: string;
   table: DisplayTable;
   shadowrocketUseBase64: boolean;
 }> {
+  const textTitle = await getSetting(env, "node_display_text_title", DEFAULT_TEXT_TITLE);
+  const tableTitle = await getSetting(env, "node_display_table_title", DEFAULT_TABLE_TITLE);
   const text = await getSetting(env, "node_display_text", "");
   const tableRaw = await getSetting(env, "node_display_table", JSON.stringify(DEFAULT_TABLE));
   const shadowrocketUseBase64 = (await getSetting(env, "shadowrocket_use_base64", "false")) === "true";
@@ -477,6 +487,8 @@ async function getDisplayContent(
     table = DEFAULT_TABLE;
   }
   return {
+    textTitle,
+    tableTitle,
     text,
     table,
     shadowrocketUseBase64,
@@ -1926,6 +1938,8 @@ const APP_HTML = String.raw`<!doctype html>
         users: [],
         prefixes: [],
         mappingText: "{}",
+        contentTextTitle: "节点文字",
+        contentTableTitle: "节点表格",
         contentText: "",
         contentTable: { columns: [], rows: [] },
         shadowrocketUseBase64: false
@@ -2063,14 +2077,17 @@ const APP_HTML = String.raw`<!doctype html>
     }
 
     function renderNodesTab() {
+      var content = state.content || {};
+      var textTitle = content.textTitle || "节点文字";
+      var tableTitle = content.tableTitle || "节点表格";
       return [
         '<section class="panel">',
-        '<h2>节点文字</h2>',
-        '<div class="readonly-text">' + esc(state.content && state.content.text ? state.content.text : "") + '</div>',
+        '<h2>' + esc(textTitle) + '</h2>',
+        '<div class="readonly-text">' + esc(content.text || "") + '</div>',
         '</section>',
         '<section class="panel">',
-        '<h2>节点表格</h2>',
-        renderReadonlyTable(state.content ? state.content.table : { columns: [], rows: [] }),
+        '<h2>' + esc(tableTitle) + '</h2>',
+        renderReadonlyTable(content.table || { columns: [], rows: [] }),
         '</section>'
       ].join("");
     }
@@ -2127,10 +2144,12 @@ const APP_HTML = String.raw`<!doctype html>
         '</section>',
         '<section class="panel">',
         '<h2>文字区域</h2>',
+        '<label>展示标题<input id="contentTextTitle" value="' + esc(state.admin.contentTextTitle) + '"></label><br>',
         '<textarea id="contentText">' + esc(state.admin.contentText) + '</textarea>',
         '</section>',
         '<section class="panel">',
         '<h2>表格区域</h2>',
+        '<label>展示标题<input id="contentTableTitle" value="' + esc(state.admin.contentTableTitle) + '"></label><br>',
         renderEditableTable(),
         '<div class="actions">',
         '<button id="addColumnBtn">添加列</button>',
@@ -2256,6 +2275,8 @@ const APP_HTML = String.raw`<!doctype html>
       var mapping = await api("/api/admin/ipv6-mappings");
       var prefixes = await api("/api/admin/prefixes");
       state.admin.users = users.users;
+      state.admin.contentTextTitle = content.textTitle || "节点文字";
+      state.admin.contentTableTitle = content.tableTitle || "节点表格";
       state.admin.contentText = content.text;
       state.admin.contentTable = content.table;
       state.admin.shadowrocketUseBase64 = !!content.shadowrocketUseBase64;
@@ -2457,12 +2478,16 @@ const APP_HTML = String.raw`<!doctype html>
           var data = await api("/api/admin/content", {
             method: "PUT",
             body: JSON.stringify({
+              textTitle: state.admin.contentTextTitle,
+              tableTitle: state.admin.contentTableTitle,
               text: document.getElementById("contentText").value,
               table: state.admin.contentTable,
               shadowrocketUseBase64: state.admin.shadowrocketUseBase64
             })
           });
           state.content = data;
+          state.admin.contentTextTitle = data.textTitle;
+          state.admin.contentTableTitle = data.tableTitle;
           state.admin.contentText = data.text;
           state.admin.contentTable = data.table;
           state.admin.shadowrocketUseBase64 = !!data.shadowrocketUseBase64;
@@ -2476,6 +2501,10 @@ const APP_HTML = String.raw`<!doctype html>
     }
 
     function syncEditableTable() {
+      var textTitle = document.getElementById("contentTextTitle");
+      if (textTitle) state.admin.contentTextTitle = textTitle.value;
+      var tableTitle = document.getElementById("contentTableTitle");
+      if (tableTitle) state.admin.contentTableTitle = tableTitle.value;
       var text = document.getElementById("contentText");
       if (text) state.admin.contentText = text.value;
       var useBase64 = document.getElementById("shadowrocketUseBase64");
