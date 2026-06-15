@@ -1872,6 +1872,67 @@ const APP_HTML = String.raw`<!doctype html>
       line-height: 1.6;
       color: var(--text);
     }
+    .markdown-content {
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+      color: var(--text);
+    }
+    .markdown-content > :first-child { margin-top: 0; }
+    .markdown-content > :last-child { margin-bottom: 0; }
+    .markdown-content p,
+    .markdown-content ul,
+    .markdown-content ol,
+    .markdown-content blockquote,
+    .markdown-content pre {
+      margin: 0 0 12px;
+    }
+    .markdown-content ul,
+    .markdown-content ol {
+      padding-left: 22px;
+    }
+    .markdown-content blockquote {
+      border-left: 3px solid var(--line);
+      color: var(--muted);
+      padding-left: 12px;
+    }
+    .markdown-content pre {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 12px;
+    }
+    .markdown-content code {
+      border-radius: 6px;
+      background: #eef2f6;
+      padding: 2px 5px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+    .markdown-content pre code {
+      background: transparent;
+      padding: 0;
+    }
+    .markdown-content img {
+      display: block;
+      max-width: 100%;
+      max-height: 560px;
+      width: auto;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 10px 0 14px;
+    }
+    .markdown-tools {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 12px;
+      margin: 12px 0;
+    }
+    .hidden-file {
+      display: none;
+    }
     .table-scroll {
       overflow: auto;
       border: 1px solid var(--line);
@@ -1955,6 +2016,161 @@ const APP_HTML = String.raw`<!doctype html>
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
+    }
+
+    function safeLinkUrl(value) {
+      var raw = String(value || "").trim();
+      if (!raw) return "";
+      if (/^(https?:|mailto:)/i.test(raw)) return raw;
+      if (raw.startsWith("/") || raw.startsWith("./") || raw.startsWith("../") || raw.startsWith("#")) return raw;
+      return "";
+    }
+
+    function safeImageUrl(value) {
+      var raw = String(value || "").trim();
+      var lower = raw.toLowerCase();
+      if (!raw) return "";
+      if (lower.startsWith("http://") || lower.startsWith("https://")) return raw;
+      if (raw.startsWith("/") || raw.startsWith("./") || raw.startsWith("../")) return raw;
+      if (
+        lower.startsWith("data:image/png;base64,") ||
+        lower.startsWith("data:image/jpeg;base64,") ||
+        lower.startsWith("data:image/jpg;base64,") ||
+        lower.startsWith("data:image/gif;base64,") ||
+        lower.startsWith("data:image/webp;base64,")
+      ) return raw;
+      return "";
+    }
+
+    function tokenFor(tokens, html) {
+      tokens.push(html);
+      return "%%MDTOKEN" + (tokens.length - 1) + "%%";
+    }
+
+    function renderMarkdownInline(value) {
+      var tokens = [];
+      var source = String(value || "");
+      var tick = String.fromCharCode(96);
+      var inlineCodePattern = new RegExp(tick + "([^" + tick + "\\\\n]+)" + tick, "g");
+      source = source.replace(inlineCodePattern, function(_, code) {
+        return tokenFor(tokens, '<code>' + esc(code) + '</code>');
+      });
+      source = source.replace(/!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, function(_, alt, url) {
+        var safeUrl = safeImageUrl(url);
+        if (!safeUrl) return "";
+        return tokenFor(tokens, '<img src="' + esc(safeUrl) + '" alt="' + esc(alt) + '" loading="lazy">');
+      });
+      source = source.replace(/\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, function(_, label, url) {
+        var safeUrl = safeLinkUrl(url);
+        if (!safeUrl) return esc(label);
+        return tokenFor(tokens, '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>');
+      });
+      source = esc(source)
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+        .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+        .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+        .replace(/_([^_\n]+)_/g, '<em>$1</em>');
+      tokens.forEach(function(token, index) {
+        source = source.replaceAll("%%MDTOKEN" + index + "%%", token);
+      });
+      return source;
+    }
+
+    function renderMarkdown(markdown) {
+      var lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+      var html = [];
+      var paragraph = [];
+      var listType = "";
+      var codeLines = [];
+      var inCode = false;
+      var fence = String.fromCharCode(96) + String.fromCharCode(96) + String.fromCharCode(96);
+
+      function flushParagraph() {
+        if (!paragraph.length) return;
+        html.push('<p>' + renderMarkdownInline(paragraph.join(" ")) + '</p>');
+        paragraph = [];
+      }
+
+      function flushList() {
+        if (!listType) return;
+        html.push(listType === "ol" ? "</ol>" : "</ul>");
+        listType = "";
+      }
+
+      lines.forEach(function(line) {
+        if (line.slice(0, 3) === fence) {
+          if (inCode) {
+            html.push('<pre><code>' + esc(codeLines.join("\n")) + '</code></pre>');
+            codeLines = [];
+            inCode = false;
+          } else {
+            flushParagraph();
+            flushList();
+            inCode = true;
+          }
+          return;
+        }
+        if (inCode) {
+          codeLines.push(line);
+          return;
+        }
+
+        if (!line.trim()) {
+          flushParagraph();
+          flushList();
+          return;
+        }
+
+        var heading = line.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          flushList();
+          var level = heading[1].length;
+          html.push('<h' + level + '>' + renderMarkdownInline(heading[2]) + '</h' + level + '>');
+          return;
+        }
+
+        var quote = line.match(/^>\s?(.+)$/);
+        if (quote) {
+          flushParagraph();
+          flushList();
+          html.push('<blockquote><p>' + renderMarkdownInline(quote[1]) + '</p></blockquote>');
+          return;
+        }
+
+        var unordered = line.match(/^[-*+]\s+(.+)$/);
+        if (unordered) {
+          flushParagraph();
+          if (listType !== "ul") {
+            flushList();
+            listType = "ul";
+            html.push("<ul>");
+          }
+          html.push('<li>' + renderMarkdownInline(unordered[1]) + '</li>');
+          return;
+        }
+
+        var ordered = line.match(/^\d+\.\s+(.+)$/);
+        if (ordered) {
+          flushParagraph();
+          if (listType !== "ol") {
+            flushList();
+            listType = "ol";
+            html.push("<ol>");
+          }
+          html.push('<li>' + renderMarkdownInline(ordered[1]) + '</li>');
+          return;
+        }
+
+        flushList();
+        paragraph.push(line.trim());
+      });
+
+      if (inCode) html.push('<pre><code>' + esc(codeLines.join("\n")) + '</code></pre>');
+      flushParagraph();
+      flushList();
+      return html.join("");
     }
 
     async function api(path, options) {
@@ -2083,7 +2299,7 @@ const APP_HTML = String.raw`<!doctype html>
       return [
         '<section class="panel">',
         '<h2>' + esc(textTitle) + '</h2>',
-        '<div class="readonly-text">' + esc(content.text || "") + '</div>',
+        '<div class="markdown-content">' + renderMarkdown(content.text || "") + '</div>',
         '</section>',
         '<section class="panel">',
         '<h2>' + esc(tableTitle) + '</h2>',
@@ -2145,6 +2361,17 @@ const APP_HTML = String.raw`<!doctype html>
         '<section class="panel">',
         '<h2>文字区域</h2>',
         '<label>展示标题<input id="contentTextTitle" value="' + esc(state.admin.contentTextTitle) + '"></label><br>',
+        '<div class="markdown-tools">',
+        '<div class="grid">',
+        '<label>图片地址<input id="markdownImageUrl" placeholder="https://example.com/image.png"></label>',
+        '<label>图片说明<input id="markdownImageAlt" placeholder="可选"></label>',
+        '</div>',
+        '<div class="actions">',
+        '<button id="insertImageUrlBtn" type="button">插入图片链接</button>',
+        '<button id="pickImageBtn" type="button">上传图片</button>',
+        '<input id="markdownImageFile" class="hidden-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">',
+        '</div>',
+        '</div>',
         '<textarea id="contentText">' + esc(state.admin.contentText) + '</textarea>',
         '</section>',
         '<section class="panel">',
@@ -2438,6 +2665,63 @@ const APP_HTML = String.raw`<!doctype html>
     }
 
     function bindContent() {
+      var insertImageUrlBtn = document.getElementById("insertImageUrlBtn");
+      if (insertImageUrlBtn) insertImageUrlBtn.addEventListener("click", function() {
+        syncEditableTable();
+        try {
+          insertMarkdownImage(
+            document.getElementById("markdownImageUrl").value,
+            document.getElementById("markdownImageAlt").value
+          );
+          document.getElementById("markdownImageUrl").value = "";
+          state.message = "图片 Markdown 已插入，记得保存展示内容。";
+          state.error = "";
+          render();
+        } catch (error) {
+          state.error = error.message;
+          render();
+        }
+      });
+
+      var pickImageBtn = document.getElementById("pickImageBtn");
+      var markdownImageFile = document.getElementById("markdownImageFile");
+      if (pickImageBtn && markdownImageFile) {
+        pickImageBtn.addEventListener("click", function() {
+          markdownImageFile.click();
+        });
+        markdownImageFile.addEventListener("change", function() {
+          syncEditableTable();
+          var file = markdownImageFile.files && markdownImageFile.files[0];
+          if (!file) return;
+          if (!["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"].includes(String(file.type).toLowerCase())) {
+            state.error = "只支持 PNG、JPG、GIF、WebP 图片。";
+            render();
+            return;
+          }
+          if (file.size > 2 * 1024 * 1024) {
+            state.error = "图片不能超过 2MB；请压缩后上传，或使用图片地址。";
+            render();
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function() {
+            try {
+              insertMarkdownImage(String(reader.result || ""), document.getElementById("markdownImageAlt").value || file.name);
+              state.message = "图片已插入，记得保存展示内容。";
+              state.error = "";
+            } catch (error) {
+              state.error = error.message;
+            }
+            render();
+          };
+          reader.onerror = function() {
+            state.error = "读取图片失败。";
+            render();
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
       var addColumnBtn = document.getElementById("addColumnBtn");
       if (addColumnBtn) addColumnBtn.addEventListener("click", function() {
         syncEditableTable();
@@ -2498,6 +2782,33 @@ const APP_HTML = String.raw`<!doctype html>
           render();
         }
       });
+    }
+
+    function insertMarkdownImage(url, alt) {
+      var safeUrl = safeImageUrl(url);
+      if (!safeUrl) {
+        throw new Error("图片地址只支持 http、https、相对路径或图片 data URL。");
+      }
+      var safeAlt = String(alt || "图片").replace(/[\r\n]/g, " ").replace(/\]/g, "\\]");
+      insertIntoContentText("![" + safeAlt + "](" + safeUrl + ")");
+    }
+
+    function insertIntoContentText(value) {
+      var textarea = document.getElementById("contentText");
+      if (!textarea) return;
+      var start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+      var end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+      var before = textarea.value.slice(0, start);
+      var after = textarea.value.slice(end);
+      var prefix = before && !before.endsWith("\n") ? "\n\n" : "";
+      var suffix = after && !after.startsWith("\n") ? "\n\n" : "\n";
+      var insert = prefix + value + suffix;
+      textarea.value = before + insert + after;
+      state.admin.contentText = textarea.value;
+      textarea.focus();
+      var cursor = before.length + insert.length;
+      textarea.selectionStart = cursor;
+      textarea.selectionEnd = cursor;
     }
 
     function syncEditableTable() {
