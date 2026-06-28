@@ -232,9 +232,9 @@ rules:
   - GEOSITE,private,DIRECT
   - GEOSITE,alibaba,DIRECT
 
-  - PROCESS-NAME,ssh.exe,DIRECT
-  - PROCESS-NAME,sftp.exe,DIRECT
-  - PROCESS-NAME,scp.exe,DIRECT
+  # - PROCESS-NAME,ssh.exe,DIRECT
+  # - PROCESS-NAME,sftp.exe,DIRECT
+  # - PROCESS-NAME,scp.exe,DIRECT
   - DST-PORT,22,DIRECT
 
   # Tailscale 控制面 / DERP / 登录相关域名直连
@@ -249,9 +249,9 @@ rules:
   - IP-CIDR,100.116.168.113/32,DIRECT,no-resolve
 
   # Tailscale 程序本身直连，Windows 下有用
-  - PROCESS-NAME,tailscale.exe,DIRECT
-  - PROCESS-NAME,tailscaled.exe,DIRECT
-  - PROCESS-NAME,tailscale-ipn.exe,DIRECT
+  # - PROCESS-NAME,tailscale.exe,DIRECT
+  # - PROCESS-NAME,tailscaled.exe,DIRECT
+  # - PROCESS-NAME,tailscale-ipn.exe,DIRECT
 
   - DOMAIN,clash.razord.top,DIRECT
   - DOMAIN,yacd.haishan.me,DIRECT
