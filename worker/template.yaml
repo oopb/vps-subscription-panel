@@ -1,7 +1,7 @@
 mixed-port: 7897
 redir-port: 7892
 tproxy-port: 7895
-allow-lan: true
+allow-lan: false
 bind-address: "*"
 mode: rule
 log-level: info
